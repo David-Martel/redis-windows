@@ -1,0 +1,46 @@
+{
+  "name": "agent-sync-semantic-index",
+  "version": "1.0.0",
+  "created": "2025-09-15T00:00:00Z",
+  "last_updated": "2025-09-15T00:00:00Z",
+  "project_root": "T:\\projects\\redis-windows\\agent-sync",
+  "indexing": {
+    "strategy": "incremental",
+    "batch_size": 50,
+    "embedding_dimensions": 1536,
+    "similarity_threshold": 0.8
+  },
+  "files": {
+    "embeddings": "embeddings.jsonl",
+    "symbols": "symbols.json",
+    "file_state": "file_state.json",
+    "cache": "cache/"
+  },
+  "rust_metadata": {
+    "edition": "2021",
+    "features": [],
+    "dependencies": {
+      "indexed": true,
+      "track_versions": true
+    },
+    "modules": {
+      "track_hierarchy": true,
+      "track_visibility": true
+    }
+  },
+  "semantic_categories": [
+    "functions",
+    "structs",
+    "enums",
+    "traits",
+    "impls",
+    "macros",
+    "modules",
+    "constants",
+    "types",
+    "async_functions",
+    "redis_operations",
+    "error_handling",
+    "memory_management"
+  ]
+}

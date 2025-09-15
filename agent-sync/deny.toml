@@ -1,0 +1,168 @@
+# cargo-deny configuration for agent-sync project
+# Ensures security, licensing, and supply chain compliance
+
+[graph]
+# Enable all dependency targets for comprehensive checking
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "x86_64-unknown-linux-musl" },
+    { triple = "x86_64-pc-windows-msvc" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "aarch64-pc-windows-msvc" },
+]
+
+# Only consider normal dependencies, not dev dependencies for licensing
+all-features = true
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+# Security vulnerability database
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "warn"
+notice = "warn"
+
+# Ignore advisories for known false positives or acceptable risks
+ignore = [
+    # Add specific advisory IDs here if needed
+    # Example: "RUSTSEC-2020-0001"
+]
+
+[licenses]
+# Define acceptable licenses for the project
+unlicensed = "deny"
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "0BSD",
+]
+
+# Warn about licenses that need review
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-3.0",
+    "LGPL-2.1",
+    "LGPL-3.0",
+    "MPL-2.0",
+    "CDDL-1.0",
+    "EPL-1.0",
+    "EPL-2.0",
+]
+
+# Licenses that require special handling
+copyleft = "warn"
+allow-osi-fsf-free = "both"
+default = "deny"
+
+# License exceptions for specific crates
+[[licenses.exceptions]]
+allow = ["Unicode-DFS-2016"]
+name = "unicode-ident"
+version = "*"
+
+[[licenses.exceptions]]
+allow = ["Ring-Readme"]
+name = "ring"
+version = "*"
+
+[bans]
+# Multiple versions of the same crate
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+
+# Specific crates to ban
+deny = [
+    # Ban crates with known security issues
+    { name = "openssl", version = "<0.10" },
+    { name = "chrono", version = "<0.4.20" },
+
+    # Ban deprecated or unmaintained crates
+    { name = "tempdir" },
+    { name = "net2" },
+
+    # Ban crates that could introduce security vulnerabilities
+    { name = "yaml-rust", version = "<0.4.5" },
+]
+
+# Crates to allow with specific versions
+allow = [
+    # Core Redis and networking crates
+    { name = "redis" },
+    { name = "tokio" },
+    { name = "tokio-util" },
+    { name = "async-std" },
+
+    # Serialization crates
+    { name = "serde" },
+    { name = "serde_json" },
+    { name = "bincode" },
+    { name = "rmp-serde" },
+
+    # Utility crates
+    { name = "uuid" },
+    { name = "chrono" },
+    { name = "thiserror" },
+    { name = "anyhow" },
+    { name = "bytes" },
+    { name = "futures" },
+    { name = "dashmap" },
+
+    # Platform-specific crates
+    { name = "winapi" },
+    { name = "widestring" },
+    { name = "libc" },
+    { name = "nix" },
+
+    # Development and testing crates
+    { name = "criterion" },
+    { name = "proptest" },
+    { name = "mockall" },
+    { name = "testcontainers" },
+]
+
+# Skip crates that are typically duplicated
+skip = [
+    # System libraries that may have multiple versions
+    { name = "windows_x86_64_msvc" },
+    { name = "windows_x86_64_gnu" },
+    { name = "windows_i686_msvc" },
+    { name = "windows_i686_gnu" },
+    { name = "windows_aarch64_msvc" },
+]
+
+# Tree skipping for complex dependency trees
+skip-tree = [
+    # Skip large dependency trees that are commonly duplicated
+    { name = "winapi", version = "=0.2.8" },
+]
+
+[sources]
+# Define allowed source registries
+unknown-registry = "warn"
+unknown-git = "warn"
+
+allow-registry = [
+    "https://github.com/rust-lang/crates.io-index"
+]
+
+allow-git = [
+    # Allow specific Git repositories if needed
+    "https://github.com/redis-rs/redis-rs",
+    "https://github.com/tokio-rs/tokio",
+]
+
+# Git sources configuration
+[sources.allow-git]

@@ -1,0 +1,405 @@
+# High-Performance Build Justfile for agent-sync
+# Install: cargo install just
+# Usage: just <recipe>
+
+# Set shell for Windows compatibility
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+set shell := ["bash", "-uc"]
+
+# Default recipe to display help
+default:
+    @just --list
+
+# Environment variables
+export RUST_BACKTRACE := "1"
+export CARGO_TERM_COLOR := "always"
+export RUSTFLAGS := "-C target-cpu=native"
+
+# Number of parallel jobs (adjust based on CPU cores)
+jobs := "8"
+
+# Detect OS for platform-specific commands
+os := if os() == "windows" { "windows" } else { "linux" }
+
+# ============ SETUP RECIPES ============
+
+# Install all development tools
+setup:
+    @echo "Installing development tools..."
+    cargo install cargo-nextest || true
+    cargo install cargo-make || true
+    cargo install just || true
+    cargo install sccache || true
+    cargo install cargo-watch || true
+    cargo install cargo-edit || true
+    cargo install cargo-outdated || true
+    cargo install cargo-audit || true
+    cargo install cargo-deny || true
+    cargo install cargo-machete || true
+    cargo install cargo-bloat || true
+    cargo install cargo-llvm-lines || true
+    @echo "✅ Setup complete!"
+
+# Setup mold linker on Linux for faster linking
+[linux]
+setup-mold:
+    #!/bin/bash
+    if ! command -v mold &> /dev/null; then
+        echo "Installing mold linker..."
+        curl -L https://github.com/rui314/mold/releases/latest/download/mold-linux-x86_64.tar.gz | tar xzf -
+        sudo cp mold-linux-x86_64/bin/mold /usr/local/bin/
+        sudo cp mold-linux-x86_64/lib/mold/mold-wrapper.so /usr/local/lib/
+        rm -rf mold-linux-x86_64
+        echo "✅ mold linker installed"
+    else
+        echo "✅ mold linker already installed"
+    fi
+
+# Start sccache daemon
+sccache-start:
+    sccache --start-server || true
+    sccache --show-stats
+
+# Stop sccache daemon
+sccache-stop:
+    sccache --stop-server || true
+
+# Show sccache statistics
+sccache-stats:
+    sccache --show-stats
+
+# ============ BUILD RECIPES ============
+
+# Fast development build
+build-fast:
+    cargo build --profile dev-fast --workspace -j {{jobs}}
+
+# Optimized development build
+build-opt:
+    cargo build --profile dev-opt --workspace -j {{jobs}}
+
+# Standard development build
+build:
+    cargo build --workspace -j {{jobs}}
+
+# Release build with optimizations
+build-release:
+    @just sccache-start
+    cargo build --release --workspace -j {{jobs}}
+
+# Production build with maximum optimizations
+build-prod:
+    @just sccache-start
+    cargo build --profile production --workspace -j {{jobs}}
+
+# Build for specific target
+build-target target:
+    cargo build --target {{target}} --workspace -j {{jobs}}
+
+# Cross-compile for Linux
+[windows]
+build-linux:
+    cargo build --target x86_64-unknown-linux-gnu --workspace -j {{jobs}}
+
+# Cross-compile for Windows
+[linux]
+build-windows:
+    cargo build --target x86_64-pc-windows-msvc --workspace -j {{jobs}}
+
+# Build all targets
+build-all:
+    @just build
+    @just build-release
+    @just build-prod
+
+# ============ TEST RECIPES ============
+
+# Run tests with nextest (faster)
+test:
+    cargo nextest run --workspace
+
+# Run all tests with all features
+test-all:
+    cargo nextest run --workspace --all-features
+
+# Run tests in CI mode
+test-ci:
+    cargo test --workspace --profile ci
+
+# Run tests in watch mode
+test-watch:
+    cargo watch -x "nextest run"
+
+# Run specific test
+test-one name:
+    cargo nextest run {{name}}
+
+# Generate test coverage
+test-coverage:
+    cargo tarpaulin --workspace --out Html --output-dir target/coverage
+    @echo "📊 Coverage report generated at target/coverage/tarpaulin-report.html"
+
+# Run tests with output
+test-verbose:
+    cargo nextest run --workspace --nocapture
+
+# ============ BENCHMARK RECIPES ============
+
+# Run benchmarks
+bench:
+    cargo bench --workspace
+
+# Run benchmarks and save baseline
+bench-save name="main":
+    cargo bench --workspace -- --save-baseline {{name}}
+
+# Compare benchmarks with baseline
+bench-compare baseline="main":
+    cargo bench --workspace -- --baseline {{baseline}}
+
+# Quick benchmark
+bench-quick:
+    cargo bench --profile dev-opt --workspace
+
+# ============ QUALITY RECIPES ============
+
+# Run clippy linter
+clippy:
+    cargo clippy --workspace --all-features -- -D warnings
+
+# Auto-fix clippy warnings
+clippy-fix:
+    cargo clippy --workspace --all-features --fix --allow-dirty --allow-staged
+
+# Format code
+fmt:
+    cargo fmt --all
+
+# Check formatting
+fmt-check:
+    cargo fmt --all -- --check
+
+# Check dependencies for security issues
+deny:
+    cargo deny check
+
+# Audit dependencies for vulnerabilities
+audit:
+    cargo audit
+
+# Check for outdated dependencies
+outdated:
+    cargo outdated --workspace
+
+# Find unused dependencies
+unused:
+    cargo machete
+
+# Run all quality checks
+quality:
+    @just fmt-check
+    @just clippy
+    @just deny
+    @just audit
+
+# Fix all auto-fixable issues
+fix:
+    @just fmt
+    @just clippy-fix
+
+# ============ OPTIMIZATION RECIPES ============
+
+# Analyze binary size
+bloat:
+    cargo bloat --release --crates
+
+# Analyze binary size with details
+bloat-details:
+    cargo bloat --release --filter '^agent' -n 50
+
+# Count LLVM IR lines
+llvm-lines:
+    cargo llvm-lines --release
+
+# Profile build time
+build-timings:
+    cargo build --release --workspace --timings
+    @echo "📊 Build timings saved to target/cargo-timings/cargo-timing.html"
+
+# Strip release binary
+[linux]
+strip:
+    strip target/release/agent_sync
+    @echo "✅ Stripped target/release/agent_sync"
+
+[windows]
+strip:
+    @echo "Stripping not needed on Windows (done by linker)"
+
+# ============ DOCUMENTATION RECIPES ============
+
+# Generate documentation
+doc:
+    cargo doc --workspace --all-features --no-deps
+
+# Generate and open documentation
+doc-open:
+    cargo doc --workspace --all-features --no-deps --open
+
+# Generate documentation with dependencies
+doc-all:
+    cargo doc --workspace --all-features
+
+# Serve documentation locally
+doc-serve:
+    python3 -m http.server 8000 --directory target/doc || python -m http.server 8000 --directory target/doc
+
+# ============ CLEAN RECIPES ============
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# Deep clean including all caches
+clean-all:
+    cargo clean
+    rm -rf target/ target-linux/ target-windows/
+    rm -rf ~/.cargo/registry/cache/
+    rm -rf ~/.cargo/git/checkouts/
+    @just sccache-stop
+    sccache --zero-stats || true
+    @echo "✅ All caches cleaned"
+
+# ============ CI/CD RECIPES ============
+
+# Run full CI pipeline
+ci:
+    @just fmt-check
+    @just clippy
+    @just deny
+    @just audit
+    @just test
+    @just build-release
+    @echo "✅ CI pipeline passed!"
+
+# Pre-commit checks
+pre-commit:
+    @just fmt
+    @just clippy-fix
+    @just test
+    @echo "✅ Pre-commit checks passed!"
+
+# Release preparation
+release-check:
+    @just quality
+    @just test-all
+    @just doc
+    @just build-prod
+    @echo "✅ Ready for release!"
+
+# ============ DEVELOPMENT RECIPES ============
+
+# Watch for changes and rebuild
+watch:
+    cargo watch -x build
+
+# Watch for changes and run tests
+watch-test:
+    cargo watch -x "nextest run"
+
+# Watch for changes and check
+watch-check:
+    cargo watch -x check
+
+# Development workflow
+dev:
+    @just fmt
+    @just clippy-fix
+    @just build-fast
+    @just test
+    @echo "✅ Development cycle complete!"
+
+# Quick build and test
+quick:
+    @just build-fast
+    @just test
+
+# Run example
+run-example name:
+    cargo run --example {{name}}
+
+# ============ UTILITY RECIPES ============
+
+# Show project statistics
+stats:
+    @echo "📊 Project Statistics:"
+    @echo "Lines of code:"
+    @tokei src/ --exclude target
+    @echo ""
+    @echo "Dependencies:"
+    @cargo tree --depth 1 | wc -l
+    @echo ""
+    @echo "Binary size (release):"
+    @ls -lh target/release/agent_sync* 2>/dev/null || echo "Not built yet"
+
+# Check everything
+check-all:
+    @just quality
+    @just test-all
+    @just bench
+    @just doc
+    @echo "✅ All checks passed!"
+
+# Update dependencies
+update:
+    cargo update --workspace
+    @echo "✅ Dependencies updated"
+
+# Create a new release
+release version:
+    @echo "Creating release {{version}}..."
+    cargo build --profile production
+    git tag -a v{{version}} -m "Release version {{version}}"
+    @echo "✅ Release v{{version}} created"
+    @echo "Don't forget to: git push origin v{{version}}"
+
+# ============ EXPERIMENTAL RECIPES ============
+
+# Build with maximum link-time optimization (very slow)
+build-lto-max:
+    CARGO_PROFILE_RELEASE_LTO="fat" \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS="1" \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL="3" \
+    cargo build --release --workspace
+
+# Build with profile-guided optimization (PGO) - Linux only
+[linux]
+build-pgo:
+    #!/bin/bash
+    echo "Building with PGO - Phase 1: Instrumented build"
+    RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release
+    echo "Phase 2: Run workload to generate profile data"
+    # Run your typical workload here
+    ./target/release/agent_sync || true
+    echo "Phase 3: Optimized build with profile data"
+    RUSTFLAGS="-Cprofile-use=/tmp/pgo-data" cargo build --release
+    echo "✅ PGO build complete"
+
+# Measure compile time improvements
+time-build profile="release":
+    hyperfine --warmup 1 \
+        'cargo clean && cargo build --profile {{profile}}' \
+        'cargo clean && RUSTC_WRAPPER=sccache cargo build --profile {{profile}}'
+
+# Print this help message
+help:
+    @echo "agent-sync build system"
+    @echo "======================="
+    @echo ""
+    @just --list --unsorted
+    @echo ""
+    @echo "Common workflows:"
+    @echo "  just dev          # Development cycle"
+    @echo "  just quick        # Quick build & test"
+    @echo "  just ci           # Run CI pipeline"
+    @echo "  just release-check # Prepare for release"

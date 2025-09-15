@@ -1,0 +1,119 @@
+# Docker Compose for agent-sync development and testing
+version: '3.8'
+
+services:
+  # Redis service for development and testing
+  redis:
+    image: redis:7-alpine
+    container_name: agent-sync-redis
+    ports:
+      - "6379:6379"
+      - "6380:6380"
+    volumes:
+      - ./redis-agent.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data:/data
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - agent-sync-net
+
+  # Agent sync development environment
+  agent-sync-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: agent-sync-dev
+    volumes:
+      - .:/workspace
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/workspace/target
+    working_dir: /workspace
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RUST_BACKTRACE=1
+      - CARGO_TERM_COLOR=always
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agent-sync-net
+    command: ["sleep", "infinity"]  # Keep container running for development
+
+  # Agent sync test runner
+  agent-sync-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    container_name: agent-sync-test
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RUST_BACKTRACE=1
+      - CARGO_TERM_COLOR=always
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agent-sync-net
+
+  # Agent sync benchmark runner
+  agent-sync-bench:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: bench
+    container_name: agent-sync-bench
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RUST_BACKTRACE=1
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agent-sync-net
+
+  # Production runtime (minimal)
+  agent-sync-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: agent-sync-prod
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agent-sync-net
+
+  # Multi-architecture build service
+  agent-sync-cross:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build-aarch64
+    container_name: agent-sync-cross
+    volumes:
+      - .:/workspace
+      - cargo-cache:/usr/local/cargo/registry
+    working_dir: /workspace
+    networks:
+      - agent-sync-net
+
+volumes:
+  redis-data:
+    driver: local
+  cargo-cache:
+    driver: local
+  target-cache:
+    driver: local
+
+networks:
+  agent-sync-net:
+    driver: bridge

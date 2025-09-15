@@ -1,0 +1,445 @@
+# cargo-make configuration for high-performance builds
+# Install: cargo install cargo-make
+
+[config]
+# Skip loading of default tasks
+skip_core_tasks = false
+# Default task to run
+default_to_workspace = false
+# Minimum cargo-make version
+min_version = "0.37.0"
+
+[env]
+# Enable all optimizations
+CARGO_MAKE_RUST_CHANNEL = "stable"
+CARGO_MAKE_CARGO_BUILD_TEST_FLAGS = "--workspace"
+RUST_BACKTRACE = "1"
+# Set default number of parallel jobs
+CARGO_BUILD_JOBS = { value = "8", condition = { env_not_set = ["CARGO_BUILD_JOBS"] } }
+# Enable sccache if available
+RUSTC_WRAPPER = { value = "sccache", condition = { env_not_set = ["RUSTC_WRAPPER"] } }
+
+# Platform-specific environment
+[env.linux]
+CARGO_TARGET_DIR = "target-linux"
+
+[env.windows]
+CARGO_TARGET_DIR = "target-windows"
+
+# Task Definitions
+
+# ============ SETUP TASKS ============
+
+[tasks.setup]
+description = "Setup development environment with all tools"
+category = "Setup"
+script = '''
+echo "Installing development tools..."
+cargo install cargo-nextest || echo "cargo-nextest already installed"
+cargo install cargo-make || echo "cargo-make already installed"
+cargo install just || echo "just already installed"
+cargo install sccache || echo "sccache already installed"
+cargo install cargo-watch || echo "cargo-watch already installed"
+cargo install cargo-edit || echo "cargo-edit already installed"
+cargo install cargo-outdated || echo "cargo-outdated already installed"
+cargo install cargo-audit || echo "cargo-audit already installed"
+cargo install cargo-deny || echo "cargo-deny already installed"
+cargo install cargo-machete || echo "cargo-machete already installed"
+cargo install cargo-bloat || echo "cargo-bloat already installed"
+cargo install cargo-llvm-lines || echo "cargo-llvm-lines already installed"
+echo "Setup complete!"
+'''
+
+[tasks.setup-linux]
+description = "Setup Linux-specific build tools (mold linker)"
+category = "Setup"
+condition = { platforms = ["linux"] }
+script = '''
+#!/bin/bash
+echo "Installing mold linker for faster linking..."
+if ! command -v mold &> /dev/null; then
+    curl -L https://github.com/rui314/mold/releases/latest/download/mold-linux-x86_64.tar.gz | tar xzf -
+    sudo cp mold-linux-x86_64/bin/mold /usr/local/bin/
+    sudo cp mold-linux-x86_64/lib/mold/mold-wrapper.so /usr/local/lib/
+    rm -rf mold-linux-x86_64
+else
+    echo "mold linker already installed"
+fi
+'''
+
+[tasks.sccache-start]
+description = "Start sccache daemon"
+category = "Cache"
+script = '''
+sccache --start-server || true
+sccache --show-stats
+'''
+
+[tasks.sccache-stop]
+description = "Stop sccache daemon"
+category = "Cache"
+script = '''
+sccache --stop-server || true
+'''
+
+[tasks.sccache-stats]
+description = "Show sccache statistics"
+category = "Cache"
+script = '''
+sccache --show-stats
+'''
+
+# ============ BUILD TASKS ============
+
+[tasks.build]
+description = "Build with default profile"
+category = "Build"
+command = "cargo"
+args = ["build", "--workspace"]
+
+[tasks.build-fast]
+description = "Fast development build (minimal optimizations)"
+category = "Build"
+command = "cargo"
+args = ["build", "--profile", "dev-fast", "--workspace"]
+
+[tasks.build-opt]
+description = "Optimized development build"
+category = "Build"
+command = "cargo"
+args = ["build", "--profile", "dev-opt", "--workspace"]
+
+[tasks.build-release]
+description = "Release build with full optimizations"
+category = "Build"
+dependencies = ["sccache-start"]
+command = "cargo"
+args = ["build", "--release", "--workspace"]
+
+[tasks.build-production]
+description = "Production build with maximum optimizations"
+category = "Build"
+dependencies = ["sccache-start"]
+command = "cargo"
+args = ["build", "--profile", "production", "--workspace"]
+
+[tasks.build-all]
+description = "Build for all targets"
+category = "Build"
+dependencies = ["sccache-start"]
+script = '''
+echo "Building for all targets..."
+cargo build --workspace
+cargo build --workspace --release
+cargo build --workspace --target x86_64-unknown-linux-gnu || echo "Linux build skipped"
+cargo build --workspace --target x86_64-pc-windows-msvc || echo "Windows build skipped"
+'''
+
+# ============ TEST TASKS ============
+
+[tasks.test]
+description = "Run tests with cargo test"
+category = "Test"
+command = "cargo"
+args = ["test", "--workspace"]
+
+[tasks.test-nextest]
+description = "Run tests with nextest (faster)"
+category = "Test"
+install_crate = "cargo-nextest"
+command = "cargo"
+args = ["nextest", "run", "--workspace"]
+
+[tasks.test-all]
+description = "Run all tests with all features"
+category = "Test"
+install_crate = "cargo-nextest"
+command = "cargo"
+args = ["nextest", "run", "--workspace", "--all-features"]
+
+[tasks.test-ci]
+description = "Run tests in CI mode"
+category = "Test"
+command = "cargo"
+args = ["test", "--workspace", "--profile", "ci"]
+
+[tasks.test-watch]
+description = "Run tests in watch mode"
+category = "Test"
+install_crate = "cargo-watch"
+command = "cargo"
+args = ["watch", "-x", "nextest run"]
+
+[tasks.test-coverage]
+description = "Generate test coverage report"
+category = "Test"
+install_crate = "cargo-tarpaulin"
+command = "cargo"
+args = ["tarpaulin", "--workspace", "--out", "Html", "--output-dir", "target/coverage"]
+
+# ============ BENCHMARK TASKS ============
+
+[tasks.bench]
+description = "Run benchmarks"
+category = "Benchmark"
+command = "cargo"
+args = ["bench", "--workspace"]
+
+[tasks.bench-baseline]
+description = "Save benchmark baseline"
+category = "Benchmark"
+command = "cargo"
+args = ["bench", "--workspace", "--", "--save-baseline", "main"]
+
+[tasks.bench-compare]
+description = "Compare benchmarks with baseline"
+category = "Benchmark"
+command = "cargo"
+args = ["bench", "--workspace", "--", "--baseline", "main"]
+
+# ============ QUALITY TASKS ============
+
+[tasks.check]
+description = "Check code without building"
+category = "Quality"
+command = "cargo"
+args = ["check", "--workspace", "--all-features"]
+
+[tasks.clippy]
+description = "Run clippy linter"
+category = "Quality"
+command = "cargo"
+args = ["clippy", "--workspace", "--all-features", "--", "-D", "warnings"]
+
+[tasks.clippy-fix]
+description = "Auto-fix clippy warnings"
+category = "Quality"
+command = "cargo"
+args = ["clippy", "--workspace", "--all-features", "--fix", "--allow-dirty", "--allow-staged"]
+
+[tasks.fmt]
+description = "Format code"
+category = "Quality"
+command = "cargo"
+args = ["fmt", "--all"]
+
+[tasks.fmt-check]
+description = "Check code formatting"
+category = "Quality"
+command = "cargo"
+args = ["fmt", "--all", "--check"]
+
+[tasks.deny]
+description = "Check dependencies for security issues"
+category = "Quality"
+install_crate = "cargo-deny"
+command = "cargo"
+args = ["deny", "check"]
+
+[tasks.audit]
+description = "Audit dependencies for vulnerabilities"
+category = "Quality"
+install_crate = "cargo-audit"
+command = "cargo"
+args = ["audit"]
+
+[tasks.outdated]
+description = "Check for outdated dependencies"
+category = "Quality"
+install_crate = "cargo-outdated"
+command = "cargo"
+args = ["outdated", "--workspace"]
+
+[tasks.machete]
+description = "Find unused dependencies"
+category = "Quality"
+install_crate = "cargo-machete"
+command = "cargo"
+args = ["machete"]
+
+# ============ OPTIMIZATION TASKS ============
+
+[tasks.bloat]
+description = "Analyze binary size"
+category = "Optimization"
+install_crate = "cargo-bloat"
+command = "cargo"
+args = ["bloat", "--release", "--crates"]
+
+[tasks.llvm-lines]
+description = "Count LLVM IR lines to find code bloat"
+category = "Optimization"
+install_crate = "cargo-llvm-lines"
+command = "cargo"
+args = ["llvm-lines", "--release"]
+
+[tasks.profile]
+description = "Profile release build (Linux only)"
+category = "Optimization"
+condition = { platforms = ["linux"] }
+script = '''
+#!/bin/bash
+echo "Building with profiling enabled..."
+CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release
+echo "Run your application and use 'perf record' to profile"
+'''
+
+[tasks.strip]
+description = "Strip symbols from release binary"
+category = "Optimization"
+dependencies = ["build-release"]
+script = '''
+echo "Stripping release binaries..."
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    strip target/release/agent_sync
+elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+    strip target/release/agent_sync.exe
+fi
+'''
+
+# ============ DOCUMENTATION TASKS ============
+
+[tasks.doc]
+description = "Generate documentation"
+category = "Documentation"
+command = "cargo"
+args = ["doc", "--workspace", "--all-features", "--no-deps"]
+
+[tasks.doc-open]
+description = "Generate and open documentation"
+category = "Documentation"
+command = "cargo"
+args = ["doc", "--workspace", "--all-features", "--no-deps", "--open"]
+
+[tasks.doc-deps]
+description = "Generate documentation including dependencies"
+category = "Documentation"
+command = "cargo"
+args = ["doc", "--workspace", "--all-features"]
+
+# ============ CLEAN TASKS ============
+
+[tasks.clean]
+description = "Clean build artifacts"
+category = "Clean"
+command = "cargo"
+args = ["clean"]
+
+[tasks.clean-all]
+description = "Clean all build artifacts and caches"
+category = "Clean"
+script = '''
+cargo clean
+rm -rf target/
+rm -rf target-linux/
+rm -rf target-windows/
+rm -rf ~/.cargo/registry/cache/
+rm -rf ~/.cargo/git/checkouts/
+sccache --stop-server || true
+sccache --zero-stats || true
+'''
+
+# ============ CI/CD TASKS ============
+
+[tasks.ci]
+description = "Run full CI pipeline"
+category = "CI"
+dependencies = [
+    "fmt-check",
+    "clippy",
+    "deny",
+    "audit",
+    "test-nextest",
+    "build-release",
+]
+
+[tasks.pre-commit]
+description = "Run pre-commit checks"
+category = "CI"
+dependencies = [
+    "fmt",
+    "clippy-fix",
+    "test-nextest",
+]
+
+[tasks.release-check]
+description = "Check if ready for release"
+category = "CI"
+dependencies = [
+    "fmt-check",
+    "clippy",
+    "deny",
+    "audit",
+    "outdated",
+    "test-all",
+    "doc",
+    "build-production",
+]
+
+# ============ WATCH TASKS ============
+
+[tasks.watch]
+description = "Watch for changes and rebuild"
+category = "Development"
+install_crate = "cargo-watch"
+command = "cargo"
+args = ["watch", "-x", "build"]
+
+[tasks.watch-test]
+description = "Watch for changes and run tests"
+category = "Development"
+install_crate = "cargo-watch"
+command = "cargo"
+args = ["watch", "-x", "nextest run"]
+
+[tasks.watch-check]
+description = "Watch for changes and check"
+category = "Development"
+install_crate = "cargo-watch"
+command = "cargo"
+args = ["watch", "-x", "check"]
+
+# ============ COMPOSITE TASKS ============
+
+[tasks.dev]
+description = "Full development cycle"
+category = "Development"
+dependencies = [
+    "fmt",
+    "clippy-fix",
+    "build-fast",
+    "test-nextest",
+]
+
+[tasks.all]
+description = "Run everything"
+category = "All"
+dependencies = [
+    "clean",
+    "fmt",
+    "clippy",
+    "build-all",
+    "test-all",
+    "bench",
+    "doc",
+]
+
+[tasks.quick]
+description = "Quick build and test"
+category = "Development"
+dependencies = [
+    "build-fast",
+    "test-nextest",
+]
+
+[tasks.fix-all]
+description = "Fix all auto-fixable issues"
+category = "Quality"
+dependencies = [
+    "fmt",
+    "clippy-fix",
+]
+
+# Default task
+[tasks.default]
+alias = "dev"

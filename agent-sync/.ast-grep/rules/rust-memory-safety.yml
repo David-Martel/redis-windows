@@ -1,0 +1,49 @@
+id: rust-memory-safety
+language: rust
+severity: error
+
+rules:
+  - id: avoid-unnecessary-clone
+    message: "Avoid unnecessary .clone() calls that can impact performance"
+    rule:
+      pattern: $VAR.clone()
+      inside:
+        any:
+          - pattern: |
+              let $NEW = $VAR.clone();
+              $NEW
+          - pattern: return $VAR.clone()
+    fix: "Consider using references or moving the value instead"
+    note: "Clone is expensive - prefer borrowing or moving when possible"
+
+  - id: prefer-as-ref-over-ref-deref
+    message: "Use .as_ref() instead of &*"
+    rule:
+      pattern: "&*$EXPR"
+    fix: "$EXPR.as_ref()"
+    note: "as_ref() is more idiomatic and clearer"
+
+  - id: avoid-unwrap-in-production
+    message: "Avoid .unwrap() in production code - use proper error handling"
+    severity: warning
+    rule:
+      any:
+        - pattern: $EXPR.unwrap()
+        - pattern: $EXPR.expect($_)
+    note: "Use match, if let, or ? operator for better error handling"
+
+  - id: use-mem-take-instead-of-replace
+    message: "Use mem::take() instead of mem::replace with Default"
+    rule:
+      pattern: std::mem::replace($TARGET, Default::default())
+    fix: std::mem::take($TARGET)
+    note: "mem::take is more explicit and idiomatic"
+
+  - id: avoid-rc-refcell-when-possible
+    message: "Consider alternatives to Rc<RefCell<T>> for better performance"
+    severity: warning
+    rule:
+      any:
+        - pattern: Rc<RefCell<$T>>
+        - pattern: Arc<Mutex<$T>>
+    note: "These patterns can indicate design issues - consider restructuring"

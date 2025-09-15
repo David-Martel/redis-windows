@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "project": "agent-sync",
+  "rust_symbols": {
+    "functions": {},
+    "structs": {},
+    "enums": {},
+    "traits": {},
+    "impls": {},
+    "macros": {},
+    "modules": {},
+    "constants": {},
+    "types": {}
+  },
+  "semantic_groups": {
+    "redis_client": {
+      "description": "Redis client and connection management",
+      "patterns": ["redis::", "Client", "Connection", "Pool"],
+      "symbols": []
+    },
+    "async_operations": {
+      "description": "Asynchronous operations and futures",
+      "patterns": ["async", "await", "tokio::", "Future"],
+      "symbols": []
+    },
+    "error_handling": {
+      "description": "Error types and handling patterns",
+      "patterns": ["Result", "Error", "?", "unwrap", "expect"],
+      "symbols": []
+    },
+    "memory_management": {
+      "description": "Memory allocation and reference counting",
+      "patterns": ["Arc", "Rc", "Box", "clone", "drop"],
+      "symbols": []
+    },
+    "serialization": {
+      "description": "Data serialization and deserialization",
+      "patterns": ["serde::", "Serialize", "Deserialize", "json"],
+      "symbols": []
+    },
+    "concurrency": {
+      "description": "Concurrency primitives and patterns",
+      "patterns": ["Mutex", "RwLock", "channel", "spawn", "join"],
+      "symbols": []
+    }
+  },
+  "cross_references": {},
+  "usage_patterns": {},
+  "performance_annotations": {
+    "hot_paths": [],
+    "memory_intensive": [],
+    "async_heavy": []
+  }
+}

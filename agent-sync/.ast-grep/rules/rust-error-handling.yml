@@ -1,0 +1,71 @@
+id: rust-error-handling
+language: rust
+severity: warning
+
+rules:
+  - id: use-question-mark-operator
+    message: "Use ? operator for error propagation instead of match"
+    rule:
+      pattern: |
+        match $EXPR {
+          Ok($VAR) => $VAR,
+          Err($ERR) => return Err($ERR),
+        }
+    fix: $EXPR?
+    note: "? operator is more concise and idiomatic"
+
+  - id: prefer-map-err-over-match
+    message: "Use .map_err() for error transformation"
+    rule:
+      pattern: |
+        match $EXPR {
+          Ok($VAR) => Ok($VAR),
+          Err($ERR) => Err($TRANSFORM),
+        }
+    fix: $EXPR.map_err(|$ERR| $TRANSFORM)
+    note: "map_err is more functional and concise"
+
+  - id: use-and-then-for-chaining-results
+    message: "Use .and_then() for chaining Result operations"
+    rule:
+      pattern: |
+        match $EXPR {
+          Ok($VAR) => $OPERATION,
+          Err($ERR) => Err($ERR),
+        }
+    fix: $EXPR.and_then(|$VAR| $OPERATION)
+    note: "and_then provides cleaner error handling chains"
+
+  - id: prefer-unwrap-or-default
+    message: "Use .unwrap_or_default() instead of unwrap_or with Default::default()"
+    rule:
+      pattern: $EXPR.unwrap_or(Default::default())
+    fix: $EXPR.unwrap_or_default()
+    note: "unwrap_or_default is more concise"
+
+  - id: use-ok-or-for-option-to-result
+    message: "Use .ok_or() to convert Option to Result"
+    rule:
+      pattern: |
+        match $OPTION {
+          Some($VAL) => Ok($VAL),
+          None => Err($ERR),
+        }
+    fix: $OPTION.ok_or($ERR)
+    note: "ok_or is more concise for Option to Result conversion"
+
+  - id: prefer-if-let-over-match-single-pattern
+    message: "Use if let for single pattern matches"
+    rule:
+      pattern: |
+        match $EXPR {
+          $PATTERN => {
+            $BODY
+          }
+          _ => {}
+        }
+    fix: |
+      if let $PATTERN = $EXPR {
+        $BODY
+      }
+    note: "if let is more concise for single pattern matches"

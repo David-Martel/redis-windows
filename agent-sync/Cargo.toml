@@ -1,0 +1,165 @@
+[package]
+name = "agent-sync"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Claude AI <claude@anthropic.com>"]
+description = "High-performance Redis agent synchronization library for cross-platform LLM agent communication"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/anthropic/redis-windows"
+keywords = ["redis", "agent", "sync", "llm", "cross-platform"]
+categories = ["database", "concurrency", "network-programming"]
+
+[lib]
+name = "agent_sync"
+crate-type = ["lib"]
+
+[features]
+default = ["tokio-runtime", "serde-support"]
+tokio-runtime = ["tokio", "tokio-util"]
+async-std-runtime = ["async-std", "async-trait"]
+serde-support = ["serde", "serde_json", "bincode", "rmp-serde"]
+metrics = ["prometheus"]
+tls = ["tokio-native-tls", "native-tls"]
+cluster = ["crc16"]
+test-utilities = ["mockall", "rand"]
+proptest = ["proptest-derive"]
+bench = []
+
+[dependencies]
+# Core async runtime
+tokio = { version = "1.35", features = ["full"], optional = true }
+tokio-util = { version = "0.7", features = ["codec"], optional = true }
+async-std = { version = "1.12", optional = true }
+async-trait = { version = "0.1", optional = true }
+
+# Redis client
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+bincode = { version = "1.3", optional = true }
+rmp-serde = { version = "1.1", optional = true }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Metrics and monitoring
+prometheus = { version = "0.13", optional = true }
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1.5"
+futures = "0.3"
+futures-util = "0.3"
+dashmap = "5.5"
+regex = "1.5"
+
+# Configuration
+config = "0.14"
+
+# TLS support
+tokio-native-tls = { version = "0.3", optional = true }
+native-tls = { version = "0.2", optional = true }
+
+# Clustering
+crc16 = { version = "0.4", optional = true }
+
+# Cross-platform file system operations
+dirs = "5.0"
+
+# Connection pooling
+bb8 = "0.8"
+bb8-redis = "0.13"
+
+# Testing utilities (optional)
+mockall = { version = "0.12", optional = true }
+rand = { version = "0.8", optional = true }
+proptest-derive = { version = "0.4", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+testcontainers = "0.15"
+testcontainers-modules = { version = "0.3", features = ["redis"] }
+rand = "0.8"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+mockall = "0.12"
+rstest = "0.18"
+serial_test = "3.0"
+wiremock = "0.5"
+temp-dir = "0.1"
+env_logger = "0.10"
+pretty_assertions = "1.4"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = false
+debug = false
+
+# Development profile with optimizations
+[profile.dev]
+opt-level = 1
+debug = 2
+split-debuginfo = "packed"
+
+# Fast development builds
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 0
+debug = 1
+incremental = true
+codegen-units = 256
+
+# Optimized development builds
+[profile.dev-opt]
+inherits = "dev"
+opt-level = 2
+debug = 1
+lto = "thin"
+codegen-units = 16
+
+# CI profile for continuous integration
+[profile.ci]
+inherits = "release"
+debug = true
+lto = "thin"
+codegen-units = 4
+
+# Benchmark profile
+[profile.bench]
+inherits = "release"
+debug = false
+lto = "fat"
+codegen-units = 1
+
+# Production profile with maximum optimizations
+[profile.production]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = false
+
+# Windows-specific dependencies
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winbase", "winnt", "processthreadsapi"] }
+widestring = "1.0"
+
+# Unix-specific dependencies (including WSL)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+nix = "0.27"

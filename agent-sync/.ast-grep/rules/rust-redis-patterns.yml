@@ -1,0 +1,75 @@
+id: rust-redis-patterns
+language: rust
+severity: warning
+
+rules:
+  - id: redis-connection-pooling
+    message: "Use connection pooling for Redis connections in production"
+    rule:
+      pattern: |
+        let client = redis::Client::open($URL)?;
+        let mut con = client.get_connection()?;
+    note: "Consider using connection pooling like r2d2-redis or bb8-redis for better performance"
+
+  - id: redis-pipeline-for-multiple-commands
+    message: "Use Redis pipeline for multiple commands"
+    rule:
+      pattern: |
+        $CON.set($KEY1, $VAL1)?;
+        $CON.set($KEY2, $VAL2)?;
+        $CON.set($KEY3, $VAL3)?;
+    note: "Use redis::pipe() to batch multiple commands for better performance"
+
+  - id: redis-error-handling
+    message: "Implement proper Redis error handling"
+    rule:
+      pattern: $CON.$METHOD($ARGS).unwrap()
+      where:
+        $METHOD:
+          regex: "(get|set|del|exists|incr|decr|hget|hset|sadd|srem|zadd|zrem)"
+    note: "Redis operations can fail - use proper error handling instead of unwrap()"
+
+  - id: redis-key-expiration
+    message: "Consider setting expiration for Redis keys"
+    rule:
+      pattern: $CON.set($KEY, $VALUE)
+    note: "Add expiration using setex() or expire() to prevent memory bloat"
+
+  - id: redis-transaction-for-atomic-ops
+    message: "Use Redis transactions for atomic operations"
+    rule:
+      pattern: |
+        $CON.get($KEY)?;
+        $CON.set($KEY, $NEW_VALUE)?;
+    note: "Use MULTI/EXEC transactions for atomic read-modify-write operations"
+
+  - id: redis-scan-instead-of-keys
+    message: "Use SCAN instead of KEYS for production code"
+    rule:
+      pattern: $CON.keys($PATTERN)
+    fix: $CON.scan_match($PATTERN)
+    note: "KEYS blocks Redis server, use SCAN for production environments"
+
+  - id: redis-compression-for-large-values
+    message: "Consider compression for large Redis values"
+    rule:
+      pattern: $CON.set($KEY, $LARGE_VALUE)
+      where:
+        $LARGE_VALUE:
+          pattern: $VAR
+    note: "Compress large values using gzip or other algorithms to save memory"
+
+  - id: redis-namespace-keys
+    message: "Use proper key namespacing for Redis keys"
+    rule:
+      pattern: $CON.set($SIMPLE_KEY, $VALUE)
+      where:
+        $SIMPLE_KEY:
+          regex: "^[a-zA-Z0-9]+$"
+    note: "Use namespaced keys like 'app:user:123' to avoid conflicts"
+
+  - id: redis-async-preferred
+    message: "Prefer async Redis operations for better concurrency"
+    rule:
+      pattern: redis::Client::open($URL)?.get_connection()?
+    note: "Consider using redis::aio for async operations in async contexts"

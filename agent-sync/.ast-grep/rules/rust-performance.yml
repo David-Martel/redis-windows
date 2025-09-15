@@ -1,0 +1,67 @@
+id: rust-performance
+language: rust
+severity: warning
+
+rules:
+  - id: use-vec-with-capacity
+    message: "Consider initializing Vec with capacity when size is known"
+    rule:
+      pattern: |
+        let mut $VAR = Vec::new();
+        for $ITEM in $ITER {
+          $VAR.push($EXPR);
+        }
+    note: "Use Vec::with_capacity() when the final size is predictable"
+
+  - id: prefer-collect-over-push-loop
+    message: "Use iterator.collect() instead of manual push loop"
+    rule:
+      pattern: |
+        let mut $VAR = Vec::new();
+        for $ITEM in $ITER {
+          $VAR.push($TRANSFORM);
+        }
+    fix: |
+      let $VAR: Vec<_> = $ITER.map(|$ITEM| $TRANSFORM).collect();
+    note: "Functional style is often more performant and readable"
+
+  - id: use-string-with-capacity
+    message: "Consider using String::with_capacity() when building strings"
+    rule:
+      pattern: |
+        let mut $VAR = String::new();
+        $$$
+        $VAR.push_str($STR);
+    note: "Pre-allocating capacity reduces reallocations"
+
+  - id: prefer-chars-over-string-indexing
+    message: "Use .chars() iterator instead of indexing strings"
+    rule:
+      pattern: $STR[$INDEX]
+      where:
+        $STR:
+          kind: expression
+          pattern: $VAR
+        $INDEX:
+          kind: expression
+    note: "String indexing can panic and is not UTF-8 aware"
+
+  - id: use-binary-heap-for-priority-queue
+    message: "Use BinaryHeap for priority queue operations"
+    rule:
+      pattern: |
+        let mut $VAR = Vec::new();
+        $$$
+        $VAR.sort();
+        $VAR.pop()
+    note: "BinaryHeap provides O(log n) insertion and O(log n) removal"
+
+  - id: prefer-iter-over-into-iter-for-references
+    message: "Use .iter() instead of .into_iter() for references"
+    rule:
+      pattern: $COLLECTION.into_iter()
+      where:
+        $COLLECTION:
+          pattern: "&$VAR"
+    fix: $VAR.iter()
+    note: "into_iter() on references is equivalent to iter() but less clear"

@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "project": "agent-sync",
+  "language": "rust",
+  "indexing": {
+    "enabled": true,
+    "auto_update": true,
+    "embedding_model": "text-embedding-ada-002",
+    "chunk_size": 1024,
+    "overlap": 128
+  },
+  "patterns": {
+    "include": [
+      "src/**/*.rs",
+      "benches/**/*.rs",
+      "tests/**/*.rs",
+      "examples/**/*.rs",
+      "Cargo.toml",
+      "README.md",
+      "*.md"
+    ],
+    "exclude": [
+      "target/**",
+      "Cargo.lock",
+      ".git/**",
+      "**/*.log",
+      "**/*.tmp"
+    ]
+  },
+  "rust_specific": {
+    "track_modules": true,
+    "track_traits": true,
+    "track_impls": true,
+    "track_macros": true,
+    "track_async_functions": true,
+    "track_redis_patterns": true
+  },
+  "agent_patterns": {
+    "redis_operations": [
+      "get", "set", "del", "exists", "expire",
+      "hget", "hset", "hdel", "sadd", "srem",
+      "zadd", "zrem", "pipeline", "multi", "exec"
+    ],
+    "async_patterns": [
+      "async fn", "await", "tokio::", "futures::",
+      "spawn", "join", "select", "timeout"
+    ],
+    "memory_patterns": [
+      "Arc", "Rc", "RefCell", "Mutex", "RwLock",
+      "Box", "clone", "move", "drop"
+    ]
+  }
+}

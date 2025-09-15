@@ -1,0 +1,205 @@
+# Pre-commit configuration for agent-sync Rust project
+# Integrates with Claude framework automation tools
+# Optimized for Rust development with Redis integration patterns
+
+fail_fast: false # Run all hooks to show all issues at once
+default_stages: [commit]
+
+repos:
+  # ============================================================================
+  # AST-grep Structural Fixes (RUNS FIRST - PRIORITY)
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: ast-grep-rust-fixes
+        name: "🔍 AST-grep Rust Auto-fixes"
+        entry: bash -c 'if command -v sg >/dev/null 2>&1 && [ -f "sgconfig.yml" ]; then sg scan --config sgconfig.yml --fix --lang rust; else echo "⚠️ AST-grep not available or no config"; fi'
+        language: system
+        files: \.rs$
+        stages: [commit]
+        pass_filenames: false
+        description: "PRIORITY: Rust structural fixes using AST-grep"
+
+      - id: ast-grep-rust-scan
+        name: "🔍 AST-grep Rust Validation"
+        entry: bash -c 'if command -v sg >/dev/null 2>&1 && [ -f "sgconfig.yml" ]; then sg scan --config sgconfig.yml --lang rust || exit 0; else echo "⚠️ AST-grep not available or no config"; fi'
+        language: system
+        files: \.rs$
+        stages: [commit]
+        pass_filenames: false
+        description: "Rust structural validation using AST-grep"
+
+  # ============================================================================
+  # RUST TOOLCHAIN FIXES (RUNS AFTER AST-GREP)
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: "🎨 Cargo Format"
+        entry: cargo fmt
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Format Rust code using rustfmt"
+
+      - id: cargo-fix
+        name: "🔧 Cargo Fix"
+        entry: cargo fix --allow-dirty --allow-staged
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Apply automatic Rust fixes"
+
+      - id: cargo-clippy-fix
+        name: "📎 Clippy Auto-fix"
+        entry: cargo clippy --fix --allow-dirty --allow-staged --all-targets --all-features
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Apply Clippy suggestions automatically"
+
+  # ============================================================================
+  # VALIDATION AND QUALITY CHECKS
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: cargo-check
+        name: "🔨 Cargo Check"
+        entry: cargo check --all-targets --all-features
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Check Rust code compilation"
+
+      - id: cargo-clippy
+        name: "📎 Clippy Linting"
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Lint Rust code with Clippy"
+
+      - id: cargo-test
+        name: "🧪 Cargo Test"
+        entry: cargo test --no-fail-fast
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Run Rust tests"
+
+  # ============================================================================
+  # REDIS-SPECIFIC VALIDATION (CUSTOM)
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: redis-patterns-check
+        name: "🔍 Redis Patterns Check"
+        entry: bash -c 'if command -v sg >/dev/null 2>&1 && [ -f ".ast-grep/rules/rust-redis-patterns.yml" ]; then sg scan -r .ast-grep/rules/rust-redis-patterns.yml --lang rust src/ || exit 0; else echo "⚠️ Redis pattern rules not available"; fi'
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Check Redis integration patterns"
+
+      - id: async-patterns-check
+        name: "⚡ Async Patterns Check"
+        entry: bash -c 'if command -v sg >/dev/null 2>&1 && [ -f ".ast-grep/rules/rust-async-patterns.yml" ]; then sg scan -r .ast-grep/rules/rust-async-patterns.yml --lang rust src/ || exit 0; else echo "⚠️ Async pattern rules not available"; fi'
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Check async/await patterns"
+
+  # ============================================================================
+  # SECURITY AND DEPENDENCY CHECKS
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: cargo-audit
+        name: "🔒 Cargo Security Audit"
+        entry: bash -c 'if command -v cargo-audit >/dev/null 2>&1; then cargo audit; else echo "⚠️ cargo-audit not installed - run: cargo install cargo-audit"; fi'
+        language: system
+        files: Cargo\.(toml|lock)
+        pass_filenames: false
+        description: "Security audit of dependencies"
+
+      - id: cargo-deny
+        name: "🚫 Cargo Deny"
+        entry: bash -c 'if command -v cargo-deny >/dev/null 2>&1 && [ -f "deny.toml" ]; then cargo deny check; else echo "⚠️ cargo-deny not installed or deny.toml missing"; fi'
+        language: system
+        files: (Cargo\.(toml|lock)|deny\.toml)
+        pass_filenames: false
+        description: "Check for denied dependencies and licenses"
+
+  # ============================================================================
+  # DOCUMENTATION AND METADATA
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: cargo-doc-check
+        name: "📚 Documentation Check"
+        entry: cargo doc --no-deps --document-private-items
+        language: system
+        files: \.rs$
+        pass_filenames: false
+        description: "Check documentation generation"
+
+  # ============================================================================
+  # FILE VALIDATION (GENERIC)
+  # ============================================================================
+  - repo: pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+        exclude: \.md$
+      - id: check-yaml
+        files: \.(yml|yaml)$
+      - id: check-toml
+        files: \.toml$
+      - id: check-json
+        files: \.json$
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+
+  # ============================================================================
+  # CARGO-SPECIFIC CHECKS
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: cargo-toml-fmt
+        name: "📝 Cargo.toml Format"
+        entry: bash -c 'if command -v cargo-sort >/dev/null 2>&1; then cargo sort --workspace; else echo "⚠️ cargo-sort not installed - run: cargo install cargo-sort"; fi'
+        language: system
+        files: Cargo\.toml$
+        pass_filenames: false
+        description: "Format and sort Cargo.toml"
+
+  # ============================================================================
+  # SEMANTIC INDEXING UPDATE (CLAUDE FRAMEWORK)
+  # ============================================================================
+  - repo: local
+    hooks:
+      - id: semantic-index-update
+        name: "🧠 Semantic Index Update"
+        entry: bash -c 'if [ -f "scripts/claude-automation/update-semantic-index.sh" ]; then ./scripts/claude-automation/update-semantic-index.sh; else echo "⚠️ Semantic index update script not found"; fi'
+        language: system
+        files: \.rs$
+        stages: [commit]
+        pass_filenames: false
+        always_run: false
+        description: "Update semantic code index for Claude framework"
+
+# ============================================================================
+# CI CONFIGURATION
+# ============================================================================
+ci:
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false
+
+# ============================================================================
+# DEFAULT LANGUAGE VERSIONS
+# ============================================================================
+default_language_version:
+  rust: stable

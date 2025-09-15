@@ -1,0 +1,68 @@
+# ast-grep user preferences configuration for agent-sync
+# This file contains project-specific preferences for ast-grep optimized for Rust development
+
+# Display settings
+color = true
+line-number = true
+heading = true
+context = 3
+max-matches = 100
+
+# Performance settings
+parallel = true
+max-filesize = "10MB"
+max-depth = 20
+
+# Output format preferences
+format = "standard"
+stats = true
+verbose = false
+
+# Error handling
+continue-on-error = true
+ignore-case = false
+
+# File type associations - Rust focused
+[language-ext]
+rust = [".rs"]
+toml = [".toml", ".Cargo.toml"]
+yaml = [".yml", ".yaml"]
+json = [".json"]
+markdown = [".md", ".mdx"]
+shell = [".sh", ".bash"]
+powershell = [".ps1", ".psm1", ".psd1"]
+
+# Project-specific ignore patterns
+[project-ignore]
+patterns = [
+  "target/**",
+  "Cargo.lock",
+  "**/.git/**",
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "**/dist/**",
+  "**/build/**",
+  "**/.cache/**",
+  "**/*_cache/**",
+  "**/.mypy_cache/**",
+  "**/.pytest_cache/**",
+  "**/.ruff_cache/**",
+  "**/*.log",
+  "**/*.tmp",
+  "**/*.temp",
+  "**/coverage/**",
+  "**/.coverage/**",
+  "**/logs/**",
+  "**/*.backup",
+  "**/*.bak"
+]
+
+# Severity mapping for Rust-specific patterns
+[severity-map]
+memory-safety = "error"
+performance = "warning"
+style = "info"
+maintainability = "warning"
+compatibility = "warning"
+unsafe-code = "error"
+deprecation = "warning"

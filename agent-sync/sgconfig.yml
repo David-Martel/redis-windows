@@ -1,0 +1,82 @@
+# ast-grep project configuration for agent-sync Rust project
+# Optimized for Rust development with agent-specific patterns
+version: 1
+
+# Directory containing rule files
+rule_dirs:
+  - .ast-grep/rules
+
+# Individual rule files to include
+ruleset:
+  - .ast-grep/rules/rust-memory-safety.yml
+  - .ast-grep/rules/rust-performance.yml
+  - .ast-grep/rules/rust-error-handling.yml
+  - .ast-grep/rules/rust-async-patterns.yml
+  - .ast-grep/rules/rust-redis-patterns.yml
+  - .ast-grep/rules/rust-style-fixes.yml
+
+# Languages to support - Rust focused
+language:
+  - rust
+  - toml
+  - yaml
+  - json
+  - markdown
+  - bash
+  - powershell
+
+# Files and directories to ignore during scanning
+ignores:
+  - target
+  - Cargo.lock
+  - .git
+  - "*.log"
+  - "*.tmp"
+  - ".DS_Store"
+  - "Thumbs.db"
+  - "**/.cache/**"
+  - "**/build/**"
+  - "**/dist/**"
+
+# Global configuration options
+options:
+  # Show more context lines around matches
+  context: 3
+
+  # Use colors in output
+  color: true
+
+  # Show line numbers
+  line-number: true
+
+  # Case sensitive matching by default for Rust
+  case-sensitive: true
+
+  # Auto-fix mode settings
+  update-all: false  # Be more conservative with Rust
+
+  # Report style for scanning
+  report-style: medium
+
+  # Interactive mode for fixes (disabled for CI)
+  interactive: false
+
+  # Parallel processing - optimize for Rust compilation
+  threads: 8
+
+# Custom severity levels for Rust-specific rule types
+severity:
+  error: ["memory-safety", "unsafe-code", "security", "bug", "critical"]
+  warning: ["performance", "style", "maintainability", "deprecation"]
+  info: ["suggestion", "enhancement", "compatibility"]
+
+# Rust-specific configuration
+rust:
+  # Rust edition to use for parsing
+  edition: "2021"
+
+  # Enable unstable features parsing
+  unstable-features: false
+
+  # Macro expansion handling
+  expand-macros: false

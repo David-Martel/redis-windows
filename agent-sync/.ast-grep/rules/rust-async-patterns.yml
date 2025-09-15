@@ -1,0 +1,73 @@
+id: rust-async-patterns
+language: rust
+severity: warning
+
+rules:
+  - id: prefer-join-over-sequential-await
+    message: "Use tokio::join! for concurrent async operations"
+    rule:
+      pattern: |
+        let $VAR1 = $ASYNC1.await;
+        let $VAR2 = $ASYNC2.await;
+    note: "Consider using tokio::join! if operations can run concurrently"
+
+  - id: use-select-for-racing-futures
+    message: "Use tokio::select! for racing multiple futures"
+    rule:
+      pattern: |
+        match futures::future::select($FUTURE1, $FUTURE2).await {
+          $BODY
+        }
+    fix: |
+      tokio::select! {
+        result1 = $FUTURE1 => { /* handle result1 */ },
+        result2 = $FUTURE2 => { /* handle result2 */ },
+      }
+    note: "tokio::select! is more idiomatic and performant"
+
+  - id: avoid-blocking-in-async
+    message: "Avoid blocking operations in async functions"
+    severity: error
+    rule:
+      any:
+        - pattern: std::thread::sleep($DURATION)
+        - pattern: std::fs::read($PATH)
+        - pattern: std::fs::write($PATH, $DATA)
+        - pattern: $RECEIVER.recv()
+      inside:
+        pattern: |
+          async fn $NAME($PARAMS) $BODY
+    note: "Use async alternatives like tokio::time::sleep, tokio::fs, etc."
+
+  - id: prefer-spawn-blocking-for-cpu-bound
+    message: "Use tokio::task::spawn_blocking for CPU-bound work"
+    rule:
+      pattern: |
+        async fn $NAME($PARAMS) {
+          $$$
+          $CPU_INTENSIVE_WORK
+          $$$
+        }
+    note: "CPU-bound work should be moved to spawn_blocking to avoid blocking the runtime"
+
+  - id: use-timeout-for-async-operations
+    message: "Consider adding timeouts to async operations"
+    rule:
+      pattern: $FUTURE.await
+      where:
+        $FUTURE:
+          any:
+            - pattern: $CLIENT.get($KEY)
+            - pattern: $CLIENT.set($KEY, $VALUE)
+            - pattern: $HTTP_CLIENT.get($URL)
+    note: "Add tokio::time::timeout for better error handling"
+
+  - id: prefer-try-join-for-fallible-concurrent
+    message: "Use tokio::try_join! for concurrent fallible operations"
+    rule:
+      pattern: |
+        let $VAR1 = $ASYNC1.await?;
+        let $VAR2 = $ASYNC2.await?;
+    fix: |
+      let ($VAR1, $VAR2) = tokio::try_join!($ASYNC1, $ASYNC2)?;
+    note: "try_join! handles errors properly in concurrent execution"

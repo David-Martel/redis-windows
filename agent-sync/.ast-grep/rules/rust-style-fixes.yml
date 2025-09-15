@@ -1,0 +1,108 @@
+id: rust-style-fixes
+language: rust
+severity: info
+
+rules:
+  - id: prefer-map-over-match-some
+    message: "Use .map() instead of match for Option transformation"
+    rule:
+      pattern: |
+        match $OPTION {
+          Some($VAR) => Some($TRANSFORM),
+          None => None,
+        }
+    fix: $OPTION.map(|$VAR| $TRANSFORM)
+    note: "map is more functional and concise"
+
+  - id: prefer-filter-over-match-bool
+    message: "Use .filter() instead of match for Option filtering"
+    rule:
+      pattern: |
+        match $OPTION {
+          Some($VAR) if $CONDITION => Some($VAR),
+          _ => None,
+        }
+    fix: $OPTION.filter(|$VAR| $CONDITION)
+    note: "filter is more expressive for conditional filtering"
+
+  - id: use-matches-macro
+    message: "Use matches! macro for boolean pattern matching"
+    rule:
+      pattern: |
+        match $EXPR {
+          $PATTERN => true,
+          _ => false,
+        }
+    fix: matches!($EXPR, $PATTERN)
+    note: "matches! macro is more concise for boolean checks"
+
+  - id: prefer-is-empty-over-len-zero
+    message: "Use .is_empty() instead of .len() == 0"
+    rule:
+      any:
+        - pattern: $COLLECTION.len() == 0
+        - pattern: $COLLECTION.len() != 0
+    fix: |
+      $COLLECTION.is_empty()  // for == 0
+      !$COLLECTION.is_empty() // for != 0
+    note: "is_empty() is more semantic and potentially more efficient"
+
+  - id: use-cloned-over-map-clone
+    message: "Use .cloned() instead of .map(|x| x.clone())"
+    rule:
+      pattern: $ITER.map(|$VAR| $VAR.clone())
+    fix: $ITER.cloned()
+    note: "cloned() is more idiomatic for iterator cloning"
+
+  - id: prefer-flat-map-over-map-flatten
+    message: "Use .flat_map() instead of .map().flatten()"
+    rule:
+      pattern: $ITER.map($FUNC).flatten()
+    fix: $ITER.flat_map($FUNC)
+    note: "flat_map is more efficient and clearer"
+
+  - id: use-copied-for-copy-types
+    message: "Use .copied() instead of .cloned() for Copy types"
+    rule:
+      pattern: $ITER.cloned()
+    note: "Use .copied() for Copy types as it's more semantic"
+
+  - id: prefer-unwrap-or-else-for-expensive-defaults
+    message: "Use .unwrap_or_else() for expensive default computations"
+    rule:
+      pattern: $OPTION.unwrap_or($EXPENSIVE_CALL)
+    fix: $OPTION.unwrap_or_else(|| $EXPENSIVE_CALL)
+    note: "unwrap_or_else evaluates the default lazily"
+
+  - id: use-take-while-instead-of-manual-break
+    message: "Consider using .take_while() instead of manual loop breaking"
+    rule:
+      pattern: |
+        for $ITEM in $ITER {
+          if !$CONDITION {
+            break;
+          }
+          $BODY
+        }
+    fix: |
+      for $ITEM in $ITER.take_while(|$ITEM| $CONDITION) {
+        $BODY
+      }
+    note: "take_while is more functional and expressive"
+
+  - id: prefer-partition-over-manual-filtering
+    message: "Use .partition() for splitting into two collections"
+    rule:
+      pattern: |
+        let mut $TRUE_VEC = Vec::new();
+        let mut $FALSE_VEC = Vec::new();
+        for $ITEM in $ITER {
+          if $CONDITION {
+            $TRUE_VEC.push($ITEM);
+          } else {
+            $FALSE_VEC.push($ITEM);
+          }
+        }
+    fix: |
+      let ($TRUE_VEC, $FALSE_VEC): (Vec<_>, Vec<_>) = $ITER.partition(|$ITEM| $CONDITION);
+    note: "partition is more functional and often more efficient"
