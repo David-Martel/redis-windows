@@ -1,0 +1,105 @@
+# High-Performance Build Configuration for agent-sync
+# Optimized for Windows MSVC, Linux GNU, and WSL targets
+
+[build]
+# Default target for Windows development
+target = "x86_64-pc-windows-msvc"
+# Enable parallel compilation - adjust based on CPU cores
+jobs = 8
+# Enable incremental compilation
+incremental = true
+# Enable pipelined compilation (Rust 1.60+)
+pipelined-compilation = true
+
+# Cargo configuration for cross-compilation with optimizations
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-arg=/SUBSYSTEM:CONSOLE",
+    "-C", "embed-bitcode=yes",
+    "-C", "opt-level=3",
+    "-C", "inline-threshold=275",
+]
+# Use LLD linker on Windows for faster linking (if available)
+# linker = "lld-link"
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-arg=-fuse-ld=mold",  # Use mold linker if available
+    "-C", "embed-bitcode=yes",
+    "-C", "opt-level=3",
+    "-C", "inline-threshold=275",
+]
+# Use mold linker on Linux for fastest linking
+# linker = "clang"
+
+[target.x86_64-unknown-linux-musl]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-arg=-static",
+    "-C", "embed-bitcode=yes",
+    "-C", "opt-level=3",
+]
+
+# Environment configuration
+[env]
+# Enable colored output
+CARGO_TERM_COLOR = "always"
+# Enable sccache if available
+# RUSTC_WRAPPER = "sccache"
+# Enable parallel front-end
+CARGO_BUILD_JOBS = "8"
+# Enable all CPU features
+RUSTFLAGS = "-C target-cpu=native"
+
+# Registry configuration
+[registries.crates-io]
+protocol = "sparse"
+
+[net]
+retry = 2
+git-fetch-with-cli = true
+offline = false
+# Enable parallel downloads
+jobs = 8
+
+# Alias definitions for common commands
+[alias]
+# Development builds
+b = "build"
+br = "build --release"
+bro = "build --profile production"
+bf = "build --profile dev-fast"
+bo = "build --profile dev-opt"
+
+# Testing with nextest
+t = "test"
+tn = "nextest run"
+tna = "nextest run --all-features"
+tc = "test --profile ci"
+
+# Checking
+c = "check"
+ca = "check --all-features"
+cl = "clippy -- -D warnings"
+cla = "clippy --all-features -- -D warnings"
+
+# Formatting and linting
+f = "fmt"
+fa = "fmt --all"
+fc = "fmt --check"
+
+# Benchmarking
+bench-quick = "bench --profile dev-opt"
+bench-full = "bench --profile bench"
+
+# Documentation
+d = "doc"
+do = "doc --open"
+da = "doc --all-features"
+
+# Cross-compilation
+xbuild-linux = "build --target x86_64-unknown-linux-gnu"
+xbuild-musl = "build --target x86_64-unknown-linux-musl"
+xbuild-win = "build --target x86_64-pc-windows-msvc"

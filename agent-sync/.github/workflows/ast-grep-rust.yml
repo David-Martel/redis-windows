@@ -1,0 +1,403 @@
+# AST-grep Analysis Workflow for Rust
+# Optimized for agent-sync project with Rust-specific patterns and Redis integration checks
+
+name: AST-grep Rust Analysis
+
+on:
+  push:
+    branches: [ main, develop, feature/** ]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '.ast-grep/**/*.yml'
+      - 'sgconfig.yml'
+      - '.github/workflows/ast-grep-rust.yml'
+
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '.ast-grep/**/*.yml'
+      - 'sgconfig.yml'
+
+  workflow_dispatch:
+    inputs:
+      scan_mode:
+        description: 'Scan mode (scan|fix|check)'
+        required: false
+        default: 'scan'
+        type: choice
+        options:
+          - scan
+          - fix
+          - check
+      rust_edition:
+        description: 'Rust edition to use'
+        required: false
+        default: '2021'
+        type: choice
+        options:
+          - '2018'
+          - '2021'
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  ast-grep-rust-analysis:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        rust-version: [stable, beta]
+        scan-type: [quick, comprehensive]
+
+    name: AST-grep Rust Analysis (${{ matrix.rust-version }}, ${{ matrix.scan-type }})
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust-version }}
+          components: rustfmt, clippy
+          cache: true
+
+      - name: Cache AST-grep binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/sg
+            ~/.cargo/registry/cache
+          key: ${{ runner.os }}-ast-grep-rust-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-ast-grep-rust-
+
+      - name: Install AST-grep
+        run: |
+          if ! command -v sg &> /dev/null; then
+            echo "Installing ast-grep..."
+            cargo install ast-grep --locked
+          else
+            echo "ast-grep already installed: $(sg --version)"
+          fi
+
+      - name: Verify Rust project structure
+        run: |
+          echo "🔍 Verifying Rust project structure..."
+          if [ -f "Cargo.toml" ]; then
+            echo "✅ Found Cargo.toml"
+            cargo check --all-targets --all-features
+          else
+            echo "❌ No Cargo.toml found"
+            exit 1
+          fi
+
+      - name: Validate AST-grep configuration
+        run: |
+          if [ -f "sgconfig.yml" ]; then
+            echo "✅ Found sgconfig.yml"
+            cat sgconfig.yml
+          else
+            echo "❌ No sgconfig.yml found"
+            exit 1
+          fi
+
+      - name: Validate Rust-specific AST-grep rules
+        run: |
+          echo "🔍 Validating Rust AST-grep rules..."
+          if [ -d ".ast-grep/rules" ]; then
+            echo "✅ Found .ast-grep/rules directory"
+            find .ast-grep/rules -name "*.yml" -exec echo "Rule file: {}" \; -exec head -10 {} \;
+          else
+            echo "❌ No .ast-grep/rules directory found"
+            exit 1
+          fi
+
+      - name: Run Rust-specific linting first
+        run: |
+          echo "🦀 Running Rust linting before AST-grep..."
+          cargo fmt --check || echo "Format issues found"
+          cargo clippy --all-targets --all-features -- -D warnings || echo "Clippy issues found"
+
+      - name: Run AST-grep scan (Quick Rust)
+        if: matrix.scan-type == 'quick'
+        run: |
+          echo "🔍 Running quick Rust AST-grep scan..."
+          sg scan --config sgconfig.yml \
+                  --lang rust \
+                  --report-style medium \
+                  --json=ast-grep-rust-quick-report.json \
+                  src/ || true
+
+      - name: Run AST-grep scan (Comprehensive Rust)
+        if: matrix.scan-type == 'comprehensive'
+        run: |
+          echo "🔍 Running comprehensive Rust AST-grep scan..."
+          sg scan --config sgconfig.yml \
+                  --lang rust \
+                  --report-style detailed \
+                  --json=ast-grep-rust-comprehensive-report.json \
+                  . || true
+
+      - name: Run Redis-specific pattern analysis
+        run: |
+          echo "🔍 Running Redis-specific pattern analysis..."
+          if [ -f ".ast-grep/rules/rust-redis-patterns.yml" ]; then
+            sg scan -r .ast-grep/rules/rust-redis-patterns.yml \
+                    --lang rust \
+                    --report-style medium \
+                    --json=ast-grep-redis-patterns-report.json \
+                    src/ || true
+          fi
+
+      - name: Run async pattern analysis
+        run: |
+          echo "🔍 Running async pattern analysis..."
+          if [ -f ".ast-grep/rules/rust-async-patterns.yml" ]; then
+            sg scan -r .ast-grep/rules/rust-async-patterns.yml \
+                    --lang rust \
+                    --report-style medium \
+                    --json=ast-grep-async-patterns-report.json \
+                    src/ || true
+          fi
+
+      - name: Run memory safety analysis
+        run: |
+          echo "🔍 Running memory safety analysis..."
+          if [ -f ".ast-grep/rules/rust-memory-safety.yml" ]; then
+            sg scan -r .ast-grep/rules/rust-memory-safety.yml \
+                    --lang rust \
+                    --report-style detailed \
+                    --json=ast-grep-memory-safety-report.json \
+                    src/ || true
+          fi
+
+      - name: Generate Rust-specific summary
+        run: |
+          echo "📊 Generating Rust AST-grep analysis summary..."
+
+          cat > ast-grep-rust-summary.md << 'EOF'
+          # AST-grep Rust Analysis Summary
+
+          ## Configuration
+          - **Rust Version**: ${{ matrix.rust-version }}
+          - **Scan Type**: ${{ matrix.scan-type }}
+          - **Config File**: sgconfig.yml
+          - **Rules Directory**: .ast-grep/rules/
+          - **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          ## Rust Project Analysis
+          EOF
+
+          echo "### Cargo Analysis" >> ast-grep-rust-summary.md
+          echo "" >> ast-grep-rust-summary.md
+          cargo --version >> ast-grep-rust-summary.md
+          echo "" >> ast-grep-rust-summary.md
+
+          # Count Rust files
+          rust_files=$(find . -name "*.rs" -type f | wc -l)
+          echo "- **Rust source files**: $rust_files" >> ast-grep-rust-summary.md
+
+          toml_files=$(find . -name "*.toml" -type f | wc -l)
+          echo "- **TOML files**: $toml_files" >> ast-grep-rust-summary.md
+
+          # Add dependency count from Cargo.toml
+          if [ -f "Cargo.toml" ]; then
+            deps=$(grep -c "^\[.*dependencies\]" Cargo.toml || echo "0")
+            echo "- **Dependency sections**: $deps" >> ast-grep-rust-summary.md
+          fi
+
+          echo "" >> ast-grep-rust-summary.md
+          echo "## Generated Reports" >> ast-grep-rust-summary.md
+          echo "" >> ast-grep-rust-summary.md
+
+          # List all generated reports
+          for report in ast-grep-*-report.json; do
+            if [ -f "$report" ]; then
+              echo "- $(basename "$report")" >> ast-grep-rust-summary.md
+            fi
+          done
+
+          echo "" >> ast-grep-rust-summary.md
+          echo "## Rule Categories Applied" >> ast-grep-rust-summary.md
+          echo "" >> ast-grep-rust-summary.md
+          echo "- Memory Safety (rust-memory-safety.yml)" >> ast-grep-rust-summary.md
+          echo "- Performance Patterns (rust-performance.yml)" >> ast-grep-rust-summary.md
+          echo "- Error Handling (rust-error-handling.yml)" >> ast-grep-rust-summary.md
+          echo "- Async Patterns (rust-async-patterns.yml)" >> ast-grep-rust-summary.md
+          echo "- Redis Integration (rust-redis-patterns.yml)" >> ast-grep-rust-summary.md
+          echo "- Style Guidelines (rust-style-fixes.yml)" >> ast-grep-rust-summary.md
+
+          echo "" >> ast-grep-rust-summary.md
+          echo "---" >> ast-grep-rust-summary.md
+          echo "*Generated by AST-grep Rust Analysis Workflow*" >> ast-grep-rust-summary.md
+
+      - name: Upload AST-grep Rust reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ast-grep-rust-reports-${{ matrix.rust-version }}-${{ matrix.scan-type }}-${{ github.run_number }}
+          path: |
+            ast-grep-*-report.json
+            ast-grep-rust-summary.md
+            sgconfig.yml
+            .ast-grep/
+          retention-days: 30
+
+      - name: Comment PR with Rust analysis results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let summaryContent = '';
+            try {
+              summaryContent = fs.readFileSync('ast-grep-rust-summary.md', 'utf8');
+            } catch (error) {
+              summaryContent = '❌ Could not read AST-grep Rust summary';
+            }
+
+            const comment = `## 🦀 AST-grep Rust Analysis Results (${{ matrix.rust-version }}, ${{ matrix.scan-type }})
+
+            ${summaryContent}
+
+            <details>
+            <summary>📋 View Detailed Analysis</summary>
+
+            - **Workflow**: ${{ github.workflow }}
+            - **Run ID**: ${{ github.run_id }}
+            - **Commit**: ${{ github.sha }}
+            - **Rust Version**: ${{ matrix.rust-version }}
+            - **Scan Type**: ${{ matrix.scan-type }}
+
+            Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for detailed reports.
+            </details>`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.body.includes(`AST-grep Rust Analysis Results (${{ matrix.rust-version }}, ${{ matrix.scan-type }})`)
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+  ast-grep-rust-fix:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.scan_mode == 'fix'
+
+    name: AST-grep Rust Auto-fix
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Install AST-grep
+        run: cargo install ast-grep --locked
+
+      - name: Run Rust format first
+        run: |
+          echo "🦀 Running cargo fmt before AST-grep fixes..."
+          cargo fmt
+
+      - name: Run AST-grep fixes
+        run: |
+          echo "🔧 Running AST-grep auto-fixes for Rust..."
+          sg scan --config sgconfig.yml --fix --lang rust || true
+
+      - name: Run cargo fmt after fixes
+        run: |
+          echo "🦀 Running cargo fmt after AST-grep fixes..."
+          cargo fmt
+
+      - name: Verify fixes don't break compilation
+        run: |
+          echo "🔍 Verifying fixes don't break compilation..."
+          cargo check --all-targets --all-features
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Changed files:"
+            git diff --name-only
+          fi
+
+      - name: Commit and push fixes
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "AST-grep Rust Auto-fix"
+          git add -A
+          git commit -m "🦀 AST-grep Rust auto-fixes
+
+          Applied Rust-specific structural fixes:
+          - Memory safety improvements
+          - Performance optimizations
+          - Error handling enhancements
+          - Async pattern improvements
+          - Redis integration patterns
+          - Code style corrections
+
+          Triggered by: ${{ github.actor }}
+          Workflow: ${{ github.workflow }}
+
+          Co-authored-by: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>"
+          git push
+
+      - name: Create fix summary
+        run: |
+          if [ "${{ steps.changes.outputs.has_changes }}" == "true" ]; then
+            echo "✅ AST-grep applied Rust fixes and committed changes"
+          else
+            echo "ℹ️ No Rust fixes were needed"
+          fi

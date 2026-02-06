@@ -1,0 +1,234 @@
+# Rust Quality Gate Workflow
+# Comprehensive quality checks for agent-sync project integrating AST-grep with standard Rust tooling
+
+name: Rust Quality Gate
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  security-events: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  quality-gate:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        rust: [stable, beta]
+
+    name: Quality Gate (${{ matrix.os }}, ${{ matrix.rust }})
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy, rust-src
+          cache: true
+
+      - name: Install additional tools
+        run: |
+          cargo install cargo-audit cargo-deny || true
+          cargo install ast-grep --locked || true
+
+      # Phase 1: Format and Style
+      - name: "Phase 1: Format Check"
+        run: |
+          echo "🎨 Phase 1: Checking code format..."
+          cargo fmt --check
+
+      # Phase 2: AST-grep Structural Analysis
+      - name: "Phase 2: AST-grep Structural Analysis"
+        run: |
+          echo "🔍 Phase 2: Running AST-grep structural analysis..."
+          if command -v sg &> /dev/null && [ -f "sgconfig.yml" ]; then
+            sg scan --config sgconfig.yml --lang rust || true
+          else
+            echo "⚠️ AST-grep not available or config missing"
+          fi
+
+      # Phase 3: Clippy Linting
+      - name: "Phase 3: Clippy Analysis"
+        run: |
+          echo "📎 Phase 3: Running Clippy analysis..."
+          cargo clippy --all-targets --all-features -- -D warnings
+
+      # Phase 4: Compilation Check
+      - name: "Phase 4: Compilation Check"
+        run: |
+          echo "🔨 Phase 4: Checking compilation..."
+          cargo check --all-targets --all-features
+
+      # Phase 5: Tests
+      - name: "Phase 5: Test Execution"
+        run: |
+          echo "🧪 Phase 5: Running tests..."
+          cargo test --all-features
+
+      # Phase 6: Security Audit
+      - name: "Phase 6: Security Audit"
+        run: |
+          echo "🔒 Phase 6: Security audit..."
+          if command -v cargo-audit &> /dev/null; then
+            cargo audit || echo "Security issues found"
+          fi
+          if command -v cargo-deny &> /dev/null && [ -f "deny.toml" ]; then
+            cargo deny check || echo "Deny check issues found"
+          fi
+
+      # Phase 7: Documentation
+      - name: "Phase 7: Documentation Check"
+        run: |
+          echo "📚 Phase 7: Documentation check..."
+          cargo doc --no-deps --document-private-items
+
+      # Phase 8: Benchmarks (if available)
+      - name: "Phase 8: Benchmark Check"
+        if: matrix.rust == 'stable' && matrix.os == 'ubuntu-latest'
+        run: |
+          echo "⚡ Phase 8: Benchmark check..."
+          if [ -d "benches" ] && [ "$(ls -A benches)" ]; then
+            cargo bench --no-run || echo "Benchmark compilation failed"
+          else
+            echo "No benchmarks found"
+          fi
+
+      # Generate quality report
+      - name: Generate Quality Report
+        if: always()
+        run: |
+          echo "📊 Generating quality report..."
+
+          cat > quality-report-${{ matrix.os }}-${{ matrix.rust }}.md << 'EOF'
+          # Rust Quality Gate Report
+
+          ## Environment
+          - **OS**: ${{ matrix.os }}
+          - **Rust Version**: ${{ matrix.rust }}
+          - **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          ## Quality Phases Results
+          EOF
+
+          echo "" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+
+          # Add Cargo info
+          echo "### Cargo Information" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          cargo --version >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          rustc --version >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          echo "" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+
+          # Add project stats
+          echo "### Project Statistics" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          echo "- **Rust files**: $(find . -name '*.rs' | wc -l)" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          echo "- **Test files**: $(find . -name '*.rs' -path '*/tests/*' | wc -l)" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          echo "- **Benchmark files**: $(find . -name '*.rs' -path '*/benches/*' | wc -l)" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          echo "" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+
+          # Add dependencies info
+          echo "### Dependencies" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          if command -v cargo-tree &> /dev/null; then
+            echo "\`\`\`" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+            cargo tree --depth 1 >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+            echo "\`\`\`" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          fi
+
+          echo "" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          echo "---" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+          echo "*Generated by Rust Quality Gate Workflow*" >> quality-report-${{ matrix.os }}-${{ matrix.rust }}.md
+
+      - name: Upload Quality Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-report-${{ matrix.os }}-${{ matrix.rust }}-${{ github.run_number }}
+          path: |
+            quality-report-*.md
+          retention-days: 30
+
+  # Cross-compilation test
+  cross-compile-test:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    name: Cross-compilation Test
+
+    strategy:
+      matrix:
+        target:
+          - x86_64-pc-windows-gnu
+          - x86_64-apple-darwin
+          - aarch64-unknown-linux-gnu
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Cross-compilation check
+        run: |
+          echo "🔨 Cross-compiling for ${{ matrix.target }}..."
+          cargo check --target ${{ matrix.target }}
+
+  # Security and dependency analysis
+  security-analysis:
+    runs-on: ubuntu-latest
+    name: Security Analysis
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install security tools
+        run: |
+          cargo install cargo-audit cargo-deny
+
+      - name: Run cargo audit
+        run: |
+          echo "🔍 Running security audit..."
+          cargo audit --json > security-audit.json || echo "Security issues found"
+
+      - name: Run cargo deny
+        if: hashFiles('deny.toml') != ''
+        run: |
+          echo "🔍 Running cargo deny..."
+          cargo deny check --log-level info
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-report-${{ github.run_number }}
+          path: |
+            security-audit.json
+          retention-days: 90

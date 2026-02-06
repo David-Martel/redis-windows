@@ -1,0 +1,129 @@
+# Cross-compilation configuration for agent-sync
+# Supports Windows MSVC, Linux GNU, and WSL targets
+
+[build]
+# Default target for Windows development
+target = "x86_64-pc-windows-msvc"
+
+# Cargo configuration for cross-compilation
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-arg=/SUBSYSTEM:CONSOLE",
+]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-arg=-fuse-ld=gold",
+]
+
+[target.x86_64-unknown-linux-musl]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-arg=-static",
+]
+
+# Additional targets for broader compatibility
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/SUBSYSTEM:CONSOLE"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=gold"]
+
+# Environment configuration
+[env]
+# Enable colored output
+CARGO_TERM_COLOR = "always"
+
+# Performance optimizations
+CARGO_PROFILE_RELEASE_LTO = "fat"
+CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1"
+CARGO_PROFILE_RELEASE_PANIC = "abort"
+
+# Development optimizations
+CARGO_PROFILE_DEV_OPT_LEVEL = "1"
+CARGO_PROFILE_DEV_DEBUG = "2"
+
+# Registry configuration
+[registry]
+default = "crates-io"
+
+[registry.crates-io]
+protocol = "sparse"
+
+# Source configuration
+# Uncomment below for offline builds with vendored dependencies
+# [source.crates-io]
+# replace-with = "vendored-sources"
+#
+# [source.vendored-sources]
+# directory = "vendor"
+
+# Network configuration
+[net]
+retry = 2
+git-fetch-with-cli = true
+offline = false
+
+# Build cache configuration
+[build-cache]
+incremental = true
+
+# Profile configurations for different build scenarios
+[profile.dev]
+opt-level = 1
+debug = 2
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = "unwind"
+incremental = true
+codegen-units = 256
+rpath = false
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = "fat"
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
+
+[profile.test]
+opt-level = 1
+debug = 2
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = "unwind"
+incremental = true
+codegen-units = 256
+
+[profile.bench]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = "fat"
+panic = "abort"
+incremental = false
+codegen-units = 1
+
+# Development profile for faster builds
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1
+debug = 1
+incremental = true
+codegen-units = 256
+
+# CI profile optimized for CI environments
+[profile.ci]
+inherits = "release"
+debug = true
+lto = "thin"
+codegen-units = 4
