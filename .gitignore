@@ -50,6 +50,10 @@ logs/
 *.pid
 *.lock
 
+# Redis download/extract artifacts
+Redis-*.zip
+redis-[0-9]*/
+
 # Deprecated artifacts
 *.old
 *.broken

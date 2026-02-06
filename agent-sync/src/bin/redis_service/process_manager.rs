@@ -42,17 +42,20 @@ impl ProcessManager {
         // Parse port from config file
         let port = parse_port_from_config(config_path).unwrap_or(6380);
 
-        // Convert config path for MSYS2/Cygwin redis-server
-        let config_cygdrive = path_convert::to_cygdrive(&config_path.to_string_lossy());
+        // Convert config path to cygdrive format for MSYS2-compiled Redis.
+        // MSYS2 builds treat forward-slash Windows paths (C:/...) as relative,
+        // prepending CWD. Cygdrive format (/cygdrive/C/...) is recognized as
+        // absolute. Rust's Command::arg() preserves spaces without shell splitting.
+        let config_fwd = path_convert::to_cygdrive(&config_path.to_string_lossy());
 
         tracing::info!(
             "Starting redis-server: {} {}",
             redis_server.display(),
-            config_cygdrive
+            config_fwd
         );
 
         let mut child = Command::new(&redis_server)
-            .arg(&config_cygdrive)
+            .arg(&config_fwd)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
