@@ -123,14 +123,13 @@ impl ContextData {
     }
 
     /// Check if data is expired
-    /// Check if data is expired
     ///
     /// # Panics
     ///
     /// Panics if system time is before UNIX EPOCH.
     #[must_use]
     pub fn is_expired(&self) -> bool {
-        self.expires_at.map_or(false, |expires_at| {
+        self.expires_at.is_some_and(|expires_at| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("System time is before UNIX EPOCH")
@@ -313,6 +312,7 @@ impl SharedContext {
             }
         }
 
+        drop(conn);
         tracing::debug!("Set context data for key: {}", redis_key);
         Ok(ContextResult::Success)
     }
@@ -342,11 +342,14 @@ impl SharedContext {
                 let _: () = conn.del(&redis_key).await.map_err(|e| {
                     Error::other(format!("Failed to delete expired context: {e}"))
                 })?;
+                drop(conn);
                 return Ok(None);
             }
 
+            drop(conn);
             Ok(Some(context_data))
         } else {
+            drop(conn);
             Ok(None)
         }
     }
@@ -397,6 +400,7 @@ impl SharedContext {
             .await
             .map_err(|e| Error::other(format!("Failed to update context: {e}")))?;
 
+        drop(conn);
         tracing::debug!("Updated context data for key: {}", redis_key);
         Ok(ContextResult::Success)
     }
@@ -415,6 +419,7 @@ impl SharedContext {
             .await
             .map_err(|e| Error::other(format!("Failed to delete context: {e}")))?;
 
+        drop(conn);
         tracing::debug!("Deleted context data for key: {}", redis_key);
         Ok(deleted > 0)
     }
@@ -433,6 +438,7 @@ impl SharedContext {
             .await
             .map_err(|e| Error::other(format!("Failed to list keys: {e}")))?;
 
+        drop(conn);
         // Strip the scope prefix to return clean keys
         let prefix = scope.prefix(&self.namespace);
 
@@ -458,6 +464,7 @@ impl SharedContext {
             .await
             .map_err(|e| Error::other(format!("Failed to check key existence: {e}")))?;
 
+        drop(conn);
         Ok(exists)
     }
 
@@ -475,6 +482,7 @@ impl SharedContext {
             .await
             .map_err(|e| Error::other(format!("Failed to set TTL: {e}")))?;
 
+        drop(conn);
         Ok(result)
     }
 
@@ -492,10 +500,11 @@ impl SharedContext {
             .await
             .map_err(|e| Error::other(format!("Failed to get TTL: {e}")))?;
 
+        drop(conn);
         match ttl_secs {
-            -1 => Ok(None), // Key exists but has no expiration
-            -2 => Ok(None), // Key doesn't exist
-            secs => Ok(Some(Duration::from_secs(secs as u64))),
+            -1 | -2 => Ok(None), // Key has no expiration or doesn't exist
+            secs if secs >= 0 => Ok(Some(Duration::from_secs(u64::try_from(secs).unwrap_or(0)))),
+            _ => Ok(None),
         }
     }
 
@@ -513,6 +522,7 @@ impl SharedContext {
             .await
             .map_err(|e| Error::other(format!("Failed to increment: {e}")))?;
 
+        drop(conn);
         Ok(result)
     }
 
@@ -539,6 +549,7 @@ impl SharedContext {
             .await
             .map_err(|e| Error::other(format!("Failed to clear scope: {e}")))?;
 
+        drop(conn);
         tracing::debug!("Cleared {} keys for scope", deleted);
         Ok(deleted)
     }
@@ -574,15 +585,15 @@ mod basic_tests {
 
         assert_eq!(
             global_scope.redis_key("test", ns),
-            format!("{}:context:global:test", ns)
+            format!("{ns}:context:global:test")
         );
         assert!(session_scope
             .redis_key("test", ns)
-            .starts_with(&format!("{}:context:session:", ns)));
+            .starts_with(&format!("{ns}:context:session:")));
         assert!(agent_scope
             .redis_key("test", ns)
             .contains(&agent_id.to_string()));
-        assert_eq!(temp_scope.redis_key("test", ns), format!("{}:context:temp:test", ns));
+        assert_eq!(temp_scope.redis_key("test", ns), format!("{ns}:context:temp:test"));
     }
 
     #[test]

@@ -151,7 +151,7 @@ impl Notification {
     /// Panics if system time is before UNIX EPOCH.
     #[must_use]
     pub fn is_expired(&self) -> bool {
-        self.ttl_secs.map_or(false, |ttl_secs| {
+        self.ttl_secs.is_some_and(|ttl_secs| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("System time is before UNIX EPOCH")
@@ -400,6 +400,7 @@ impl NotificationBus {
             .publish(&channel, &serialized)
             .await
             .map_err(|e| Error::other(format!("Failed to publish notification: {e}")))?;
+        drop(conn);
 
         // Update statistics
         let mut stats = self.stats.write().await;
@@ -418,6 +419,7 @@ impl NotificationBus {
             .priority_counts
             .entry(notification.priority as u8)
             .or_insert(0) += 1;
+        drop(stats);
 
         tracing::debug!(
             "Published notification {} to {} subscribers",
@@ -494,6 +496,7 @@ impl NotificationBus {
         if removed {
             let mut stats = self.stats.write().await;
             stats.active_subscribers = stats.active_subscribers.saturating_sub(1);
+            drop(stats);
             tracing::debug!("Removed subscription {}", subscription_id);
         }
 
@@ -501,6 +504,7 @@ impl NotificationBus {
     }
 
     /// Start the subscription handler task
+    #[allow(clippy::unused_async)]
     async fn start_subscription_handler(&self) -> Result<()> {
         if self.shutdown_sender.is_some() {
             return Ok(()); // Already running
@@ -593,9 +597,11 @@ impl NotificationBus {
             }
         }
 
+        drop(subscribers_guard);
         if delivered_count > 0 {
             let mut stats_guard = stats.write().await;
             stats_guard.total_received += delivered_count;
+            drop(stats_guard);
             tracing::debug!(
                 "Distributed notification {} to {} subscribers",
                 notification.id,
@@ -655,6 +661,7 @@ impl NotificationBus {
             .publish(&channel, &serialized)
             .await
             .map_err(|e| Error::other(format!("Failed to publish system notification: {e}")))?;
+        drop(conn);
 
         // Update statistics
         let mut stats = self.stats.write().await;
@@ -664,6 +671,7 @@ impl NotificationBus {
             .priority_counts
             .entry(notification.priority as u8)
             .or_insert(0) += 1;
+        drop(stats);
 
         Ok(subscriber_count)
     }
@@ -686,12 +694,14 @@ impl NotificationBus {
                 true
             }
         });
+        drop(subscribers);
 
         if removed_subscribers > 0 {
             let mut stats = self.stats.write().await;
             stats.active_subscribers = stats
                 .active_subscribers
                 .saturating_sub(u64::from(removed_subscribers));
+            drop(stats);
         }
 
         tracing::debug!("Cleanup removed {} dead subscribers", removed_subscribers);
@@ -781,15 +791,15 @@ mod basic_tests {
 
         assert_eq!(
             task_notification.channel_name(ns),
-            format!("{}:notifications:task", ns)
+            format!("{ns}:notifications:task")
         );
         assert_eq!(
             context_notification.channel_name(ns),
-            format!("{}:notifications:context", ns)
+            format!("{ns}:notifications:context")
         );
         assert_eq!(
             custom_notification.channel_name(ns),
-            format!("{}:notifications:custom:metrics", ns)
+            format!("{ns}:notifications:custom:metrics")
         );
     }
 

@@ -149,9 +149,6 @@ impl Task {
         self
     }
 
-    /// Add tags to task
-        /// Add metadata to the task.
-    /// Add metadata to the task.
     /// Add metadata to the task.
     #[must_use]
     pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
@@ -167,14 +164,13 @@ impl Task {
     }
 
     /// Check if task is expired
-    /// Check if task is expired
     ///
     /// # Panics
     ///
     /// Panics if system time is before UNIX EPOCH.
     #[must_use]
     pub fn is_expired(&self) -> bool {
-        self.deadline.map_or(false, |deadline| {
+        self.deadline.is_some_and(|deadline| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("System time is before UNIX EPOCH")
@@ -254,18 +250,14 @@ impl TaskQueue {
         Ok(Self {
             client,
             connection: Arc::new(RwLock::new(connection)),
-            queue_key: format!("{}:{}", namespace, Self::QUEUE_SUFFIX),
-            processing_key: format!("{}:{}", namespace, Self::PROCESSING_SUFFIX),
-            completed_key: format!("{}:{}", namespace, Self::COMPLETED_SUFFIX),
-            failed_key: format!("{}:{}", namespace, Self::FAILED_SUFFIX),
+            queue_key: format!("{namespace}:{}", Self::QUEUE_SUFFIX),
+            processing_key: format!("{namespace}:{}", Self::PROCESSING_SUFFIX),
+            completed_key: format!("{namespace}:{}", Self::COMPLETED_SUFFIX),
+            failed_key: format!("{namespace}:{}", Self::FAILED_SUFFIX),
         })
     }
 
-    /// Create a new task queue
-    ///
-    /// # Errors
-    ///
-    /// Returns error if Redis connection fails. using an existing multiplexed connection.
+    /// Create a new task queue using an existing multiplexed connection.
     pub fn new_with_connection(
         client: Client,
         connection: redis::aio::MultiplexedConnection,
@@ -273,11 +265,7 @@ impl TaskQueue {
         Self::new_with_namespace_and_connection(client, connection, DEFAULT_NAMESPACE)
     }
 
-    /// Create a new task queue
-    ///
-    /// # Errors
-    ///
-    /// Returns error if Redis connection fails. using an existing multiplexed connection and a custom namespace.
+    /// Create a new task queue using an existing connection and a custom namespace.
     pub fn new_with_namespace_and_connection(
         client: Client,
         connection: redis::aio::MultiplexedConnection,
@@ -286,10 +274,10 @@ impl TaskQueue {
         Self {
             client,
             connection: Arc::new(RwLock::new(connection)),
-            queue_key: format!("{}:{}", namespace, Self::QUEUE_SUFFIX),
-            processing_key: format!("{}:{}", namespace, Self::PROCESSING_SUFFIX),
-            completed_key: format!("{}:{}", namespace, Self::COMPLETED_SUFFIX),
-            failed_key: format!("{}:{}", namespace, Self::FAILED_SUFFIX),
+            queue_key: format!("{namespace}:{}", Self::QUEUE_SUFFIX),
+            processing_key: format!("{namespace}:{}", Self::PROCESSING_SUFFIX),
+            completed_key: format!("{namespace}:{}", Self::COMPLETED_SUFFIX),
+            failed_key: format!("{namespace}:{}", Self::FAILED_SUFFIX),
         }
     }
 
@@ -313,6 +301,7 @@ impl TaskQueue {
             .await
             .map_err(|e| Error::other(format!("Failed to enqueue task: {e}")))?;
 
+        drop(conn);
         tracing::debug!(
             "Enqueued task {} with priority {:?}",
             task.id,
@@ -353,9 +342,11 @@ impl TaskQueue {
                     Error::other(format!("Failed to add task to processing queue: {e}"))
                 })?;
 
+            drop(conn);
             tracing::debug!("Dequeued task {} for agent {}", task.id, agent_id);
             Ok(Some(task))
         } else {
+            drop(conn);
             Ok(None)
         }
     }
@@ -393,6 +384,7 @@ impl TaskQueue {
             .await
             .map_err(|e| Error::other(format!("Failed to complete task: {e}")))?;
 
+        drop(conn);
         tracing::debug!("Completed task {}", task_id);
         Ok(())
     }
@@ -433,6 +425,7 @@ impl TaskQueue {
                 .await
                 .map_err(|e| Error::other(format!("Failed to retry task: {e}")))?;
 
+            drop(conn);
             tracing::debug!("Retrying task {} (attempt {})", task_id, task.retry_count);
         } else {
             // Mark as failed permanently
@@ -449,6 +442,7 @@ impl TaskQueue {
                 .await
                 .map_err(|e| Error::other(format!("Failed to fail task: {e}")))?;
 
+            drop(conn);
             tracing::debug!("Failed task {} permanently", task_id);
         }
 
@@ -483,6 +477,7 @@ impl TaskQueue {
             .await
             .map_err(|e| Error::other(format!("Failed to get failed count: {e}")))?;
 
+        drop(conn);
         Ok(TaskQueueStats {
             pending_count,
             in_progress_count,
@@ -506,6 +501,7 @@ impl TaskQueue {
             .hget::<_, _, Vec<u8>>(&self.processing_key, task_id.to_string())
             .await
         {
+            drop(conn);
             let task: Task = bincode::deserialize(&task_data)
                 .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
             return Ok(Some(task));
@@ -516,6 +512,7 @@ impl TaskQueue {
             .hget::<_, _, Vec<u8>>(&self.completed_key, task_id.to_string())
             .await
         {
+            drop(conn);
             let task: Task = bincode::deserialize(&task_data)
                 .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
             return Ok(Some(task));
@@ -526,11 +523,13 @@ impl TaskQueue {
             .hget::<_, _, Vec<u8>>(&self.failed_key, task_id.to_string())
             .await
         {
+            drop(conn);
             let task: Task = bincode::deserialize(&task_data)
                 .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
             return Ok(Some(task));
         }
 
+        drop(conn);
         Ok(None)
     }
 

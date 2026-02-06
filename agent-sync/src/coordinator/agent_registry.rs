@@ -185,6 +185,7 @@ impl AgentRegistry {
             .await
             .map_err(|e| Error::other(format!("Failed to set heartbeat key: {e}")))?;
 
+        drop(conn);
         tracing::info!(%id, "Agent registered");
         Ok(agent)
     }
@@ -208,6 +209,7 @@ impl AgentRegistry {
             .await
             .map_err(|e| Error::other(format!("Failed to remove heartbeat key: {e}")))?;
 
+        drop(conn);
         tracing::info!(%id, "Agent deregistered");
         Ok(removed > 0)
     }
@@ -262,6 +264,7 @@ impl AgentRegistry {
             }
         }
 
+        drop(conn);
         Ok(())
     }
 
@@ -278,6 +281,7 @@ impl AgentRegistry {
             .await
             .map_err(|e| Error::other(format!("Failed to list agents: {e}")))?;
 
+        drop(conn);
         let mut agents = Vec::with_capacity(entries.len());
         for (_key, value) in entries {
             if let Ok(agent) = serde_json::from_str::<RegisteredAgent>(&value) {
