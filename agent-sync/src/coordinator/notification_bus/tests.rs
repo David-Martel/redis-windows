@@ -228,7 +228,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            format!("{}:notifications:task", ns),
+            format!("{ns}:notifications:task"),
         ),
         (
             Notification::new(
@@ -240,7 +240,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            format!("{}:notifications:context", ns),
+            format!("{ns}:notifications:context"),
         ),
         (
             Notification::new(
@@ -251,7 +251,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            format!("{}:notifications:agent", ns),
+            format!("{ns}:notifications:agent"),
         ),
         (
             Notification::new(
@@ -262,7 +262,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            format!("{}:notifications:system", ns),
+            format!("{ns}:notifications:system"),
         ),
         (
             Notification::new(
@@ -273,7 +273,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            format!("{}:notifications:custom:metrics", ns),
+            format!("{ns}:notifications:custom:metrics"),
         ),
     ];
 
@@ -467,7 +467,7 @@ fn test_notification_filter_type_matching(test_agent_id: AgentId) {
         level: "info".to_string(),
     };
 
-    let filter = NotificationFilter::new().with_types(vec![task_type.clone()]);
+    let filter = NotificationFilter::new().with_types(vec![task_type]);
 
     // Create notifications of different types
     let task_notification = Notification::new(
@@ -497,7 +497,7 @@ fn test_subscriber_creation() {
     let subscriber = Subscriber {
         id: Uuid::new_v4(),
         agent_id,
-        filter: filter.clone(),
+        filter,
         sender,
         subscribed_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -655,6 +655,7 @@ mod proptest_tests {
 }
 
 // Integration test helpers
+#[allow(dead_code)]
 mod integration_helpers {
     use super::*;
 
@@ -664,7 +665,7 @@ mod integration_helpers {
         } else {
             6379
         };
-        NotificationBus::new(&format!("redis://localhost:{}", port)).await
+        NotificationBus::new(&format!("redis://localhost:{port}")).await
     }
 
     pub fn create_test_notifications(count: usize, sender: AgentId) -> Vec<Notification> {
@@ -680,10 +681,10 @@ mod integration_helpers {
 
                 Notification::new(
                     NotificationType::Custom {
-                        category: format!("test_{}", i),
+                        category: format!("test_{i}"),
                         data: HashMap::new(),
                     },
-                    format!("payload_{}", i).into_bytes(),
+                    format!("payload_{i}").into_bytes(),
                     sender,
                 )
                 .with_priority(priority)

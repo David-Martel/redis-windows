@@ -212,7 +212,7 @@ fn test_task_queue_stats_default() {
     assert_eq!(stats.completed_count, 0);
     assert_eq!(stats.failed_count, 0);
     assert!(stats.priority_counts.is_empty());
-    assert_eq!(stats.avg_processing_time_ms, 0.0);
+    assert!(stats.avg_processing_time_ms.abs() < f64::EPSILON);
 }
 
 #[rstest]
@@ -262,6 +262,7 @@ fn test_task_status_serialization() {
 }
 
 // Integration test helpers
+#[allow(dead_code)]
 mod integration_helpers {
     use super::*;
 
@@ -274,8 +275,8 @@ mod integration_helpers {
         (0..count)
             .map(|i| {
                 Task::new(
-                    format!("task_{}", i),
-                    format!("payload_{}", i).into_bytes(),
+                    format!("task_{i}"),
+                    format!("payload_{i}").into_bytes(),
                     agent_id,
                 )
                 .with_priority(match i % 4 {

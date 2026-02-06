@@ -41,22 +41,22 @@ fn test_context_scope_redis_key_generation() {
 
     assert_eq!(
         global_scope.redis_key("test_key", ns),
-        format!("{}:context:global:test_key", ns)
+        format!("{ns}:context:global:test_key")
     );
 
     let session_key = session_scope.redis_key("test_key", ns);
-    assert!(session_key.starts_with(&format!("{}:context:session:", ns)));
+    assert!(session_key.starts_with(&format!("{ns}:context:session:")));
     assert!(session_key.contains(&session_id.to_string()));
     assert!(session_key.ends_with(":test_key"));
 
     let agent_key = agent_scope.redis_key("test_key", ns);
-    assert!(agent_key.starts_with(&format!("{}:context:agent:", ns)));
+    assert!(agent_key.starts_with(&format!("{ns}:context:agent:")));
     assert!(agent_key.contains(&agent_id.to_string()));
     assert!(agent_key.ends_with(":test_key"));
 
     assert_eq!(
         temp_scope.redis_key("test_key", ns),
-        format!("{}:context:temp:test_key", ns)
+        format!("{ns}:context:temp:test_key")
     );
 }
 
@@ -139,7 +139,11 @@ fn test_context_data_expiration_behavior(test_agent_id: AgentId) {
 
     // Allow some tolerance for timing
     let actual_expiry = data.expires_at.unwrap();
-    assert!((actual_expiry as i64 - expected_expiry as i64).abs() <= 2);
+    assert!(
+        (i64::try_from(actual_expiry).unwrap_or(0) - i64::try_from(expected_expiry).unwrap_or(0))
+            .abs()
+            <= 2
+    );
 }
 
 #[rstest]
@@ -397,6 +401,7 @@ mod proptest_tests {
 }
 
 // Integration test helpers
+#[allow(dead_code)]
 mod integration_helpers {
     use super::*;
 
@@ -406,7 +411,7 @@ mod integration_helpers {
         } else {
             6379
         };
-        SharedContext::new(&format!("redis://localhost:{}", port)).await
+        SharedContext::new(&format!("redis://localhost:{port}")).await
     }
 
     pub fn create_test_scopes(session_id: SessionId, agent_id: AgentId) -> Vec<ContextScope> {
