@@ -121,8 +121,8 @@ allow = [
     { name = "dashmap" },
 
     # Platform-specific crates
-    { name = "winapi" },
-    { name = "widestring" },
+    { name = "windows" },
+    { name = "windows-core" },
     { name = "libc" },
     { name = "nix" },
 

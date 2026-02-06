@@ -92,7 +92,7 @@ rand = { version = "0.8", optional = true }
 proptest-derive = { version = "0.4", optional = true }
 
 # Windows service binary (optional, behind "service" feature)
-windows-service = { version = "0.7", optional = true }
+windows-service = { version = "0.8", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 
 [dev-dependencies]
@@ -167,8 +167,11 @@ overflow-checks = false
 
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winbase", "winnt", "processthreadsapi"] }
-widestring = "1.0"
+windows = { version = "0.58", features = [
+    "Win32_System_EventLog",
+    "Win32_Foundation",
+    "Win32_Security",
+] }
 
 # Unix-specific dependencies (including WSL)
 [target.'cfg(unix)'.dependencies]
