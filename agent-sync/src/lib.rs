@@ -6,8 +6,7 @@
 
 #![deny(missing_docs, unsafe_code)]
 #![warn(clippy::all, clippy::pedantic, clippy::nursery)]
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, clippy::module_name_repetitions)]
-#![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, clippy::module_name_repetitions, clippy::must_use_candidate)]
 
 // Re-export key types from dependencies for convenience
 pub use redis::{RedisError, RedisResult};
@@ -71,6 +70,7 @@ pub const DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
 /// # Panics
 ///
 /// Panics if tracing initialization fails.
+#[allow(clippy::unused_async)]
 pub async fn init() -> Result<()> {
     // Initialize tracing
     #[cfg(not(test))]
@@ -88,7 +88,7 @@ pub async fn init() -> Result<()> {
     }
 
     // Initialize platform-specific components
-    platform::init().await?;
+    platform::init()?;
 
     tracing::info!("Agent-sync library initialized successfully");
     Ok(())

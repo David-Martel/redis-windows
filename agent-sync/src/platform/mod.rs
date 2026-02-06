@@ -3,7 +3,7 @@
 use crate::error::Result;
 
 /// Initialize platform-specific components
-pub async fn init() -> Result<()> {
+pub const fn init() -> Result<()> {
     Ok(())
 }
 
