@@ -1,10 +1,7 @@
-# Build artifacts - .NET
-bin/
-*/bin/
-obj/
-*/obj/
-publish/
-*/publish/
+# Build artifacts - .NET (root-relative to avoid matching agent-sync/src/bin/)
+/bin/
+/obj/
+/publish/
 
 # Build artifacts - Rust
 agent-sync/target/
