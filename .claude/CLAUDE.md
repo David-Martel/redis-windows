@@ -216,12 +216,12 @@ cargo audit
 ```toml
 [dependencies]
 tokio = { version = "1.35", features = ["full"] }
-redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "0.32", features = ["tokio-comp", "connection-manager", "aio"] }
 serde = { version = "1.0", features = ["derive"] }
-thiserror = "1.0"
+thiserror = "2.0"
 tracing = "0.1"
-bb8 = "0.8"
-bb8-redis = "0.13"
+bb8 = "0.9"
+bb8-redis = "0.24"
 
 [dev-dependencies]
 criterion = "0.5"

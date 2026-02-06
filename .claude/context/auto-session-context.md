@@ -1,33 +1,35 @@
 # Auto Session Context - redis-windows
-Generated: 2026-02-06
+Generated: 2026-02-06T08:00Z
 
 ## Project State
-- Branch: `main` (1 commit ahead of origin/main)
-- Last commit: `003eb5f` - feat: Add agent-sync high-performance Rust library
-- Active work: agent-sync Rust library, Redis Windows Service
+- Branch: `main` @ `0086b7d` + uncommitted agent-sync overhaul
+- Upstream: merged at `b560097` (Redis 8.4.0)
+- Major uncommitted changes: agent-sync Rust library rewrite, documentation overhaul
+
+## Architecture (Current)
+```
+LLM Agents → agent-sync (Rust) → Redis 8.4.0 (Windows Service, port 6380)
+```
+- Python agent-memory-server: **DEPRECATED** (replaced by agent-sync)
 
 ## Components
-| Component | Status | Location |
+| Component | Status | Key File |
 |-----------|--------|----------|
-| .NET 8 Windows Service | Production | Program.cs, RedisService.csproj |
-| Redis configs | Production | redis-agent.conf (primary), redis-windows.conf, redis.hybrid.conf |
-| PowerShell build system | Production | build.ps1, build-modular.ps1, install-redis-service.ps1 |
-| agent-sync Rust lib | Development | agent-sync/ (23 source files) |
+| .NET 8 Windows Service | Production | Program.cs |
+| Redis 8.4.0 configs | Production | redis-agent.conf (port 6380) |
+| PowerShell scripts (6) | Production | build.ps1, manage-dual-redis.ps1 |
+| agent-sync Rust lib | Development (23 src files) | agent-sync/Cargo.toml |
+| CI/CD | Production | .github/workflows/ |
+
+## Key Dependencies (agent-sync)
+- redis: 0.32 (with tokio-comp, connection-manager, aio)
+- tokio: 1.35
+- bb8: 0.9, bb8-redis: 0.24
+- thiserror: 2.0
+- serde: 1.0, serde_json: 1.0
 
 ## Key Facts
-- Redis port: 6380 (Windows/agent), 6379 (WSL/dev)
+- Redis: 8.4.0, ports 6380 (agent) / 6379 (WSL dev)
+- .NET: 8.0, Hosting.WindowsServices 8.0.1
+- Python: always `uv run python`
 - Service name: "Redis Server"
-- .NET 8 SDK required, targets win-x64
-- agent-sync uses: redis 0.25, thiserror 1.0, tokio 1.35, bb8 for pooling
-- Agent memory server: Python via UV, ports 8000 (REST) + 8001 (MCP)
-
-## Untracked Files (notable)
-- agent-sync/ workflow configs (.github/, .cargo/)
-- Several PowerShell management scripts
-- Multiple analysis/guide markdown files
-
-## Recent CLAUDE.md Improvements (this session)
-- Fixed bare `python` command to `uv run python`
-- Updated agent-sync section from aspirational "Vision" to factual
-- Fixed all dependency versions in .claude/CLAUDE.md (redis, thiserror, pooling lib, dev-deps)
-- Removed references to crates not in Cargo.toml (SmallVec, zeroize, deadpool-redis)

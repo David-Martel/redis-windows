@@ -1,0 +1,16 @@
+{
+  "schema_version": "2.0",
+  "contexts": [
+    {
+      "id": "ctx-redis-windows-20260206",
+      "file": "redis-windows-context-20260206.md",
+      "created": "2026-02-06T06:40:00Z",
+      "project": "redis-windows",
+      "branch": "main",
+      "commit": "0086b7d",
+      "agents_involved": ["search-specialist", "Explore"],
+      "summary": "Merged upstream Redis 8.4.0, fixed CLAUDE.md inaccuracies, committed 27 files in 8 semantic clusters, resolved Program.cs merge conflict combining logging with graceful shutdown"
+    }
+  ],
+  "latest": "ctx-redis-windows-20260206"
+}
