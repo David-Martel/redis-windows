@@ -7,7 +7,6 @@ This file provides coding standards and requirements for Claude Code when workin
 ### 1. Performance First
 - **Sub-millisecond latency** is non-negotiable for agent coordination
 - Use `Arc<T>` over `Rc<T>` for thread-safe reference counting
-- Prefer `SmallVec` for small collections to avoid heap allocations
 - Use `Cow<'_, str>` for string operations where ownership is conditional
 - Profile before optimizing - use `criterion` benchmarks as evidence
 
@@ -194,10 +193,6 @@ let results: Vec<_> = items.par_iter()
 // Use environment variables or secure vaults
 let redis_password = std::env::var("REDIS_PASSWORD")
     .unwrap_or_else(|_| String::new());
-
-// Clear sensitive data from memory
-use zeroize::Zeroize;
-password.zeroize();
 ```
 
 ## CI/CD Requirements
@@ -220,18 +215,19 @@ cargo audit
 ### Approved Core Dependencies
 ```toml
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
-serde = { version = "1", features = ["derive"] }
-thiserror = "2"
+tokio = { version = "1.35", features = ["full"] }
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
 tracing = "0.1"
-deadpool-redis = "0.18"
+bb8 = "0.8"
+bb8-redis = "0.13"
 
 [dev-dependencies]
 criterion = "0.5"
-rstest = "0.23"
-testcontainers = "0.24"
-mockall = "0.13"
+rstest = "0.18"
+testcontainers = "0.15"
+mockall = "0.12"
 ```
 
 ### Version Policy

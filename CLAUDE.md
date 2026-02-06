@@ -87,7 +87,7 @@ redis-cli.exe info memory
 
 # Test agent integration
 curl http://localhost:8000/health
-python -m agent_memory_server.cli mcp --mode stdio
+uv run python -m agent_memory_server.cli mcp --mode stdio
 ```
 
 ## High-Level Architecture
@@ -220,29 +220,29 @@ net start Redis
 - `OPENAI_API_KEY`: Required for embedding generation
 - `PORT`/`MCP_PORT`: API and MCP server ports
 
-## Agent-Sync Framework Vision
+## Agent-Sync Rust Framework
 
-### Project Goal
-Develop a high-performance Rust library (`agent-sync`) that provides distributed coordination primitives for AI agents using Redis as the backbone. This framework will integrate seamlessly with the existing Redis Windows service to enable:
-- **Task distribution** across multiple agents with capability matching
-- **Shared context** with semantic search and vector storage
-- **Real-time notifications** for inter-agent communication
-- **Cross-platform support** for Windows native and WSL environments
+The `agent-sync` crate (`agent-sync/`) provides high-performance distributed coordination primitives for AI agents using Redis as the backbone.
 
-### Integration Strategy
-The `agent-sync` library will:
-1. Connect to the existing Redis service (port 6380) using the agent-optimized configuration
-2. Provide async Rust APIs that complement the Python agent-memory-server
-3. Enable high-throughput agent coordination (100K+ tasks/second)
-4. Support both Windows Service and WSL deployment scenarios
+### Current Implementation
+- **TaskQueue** (`src/coordinator/task_queue.rs`): Distributed task scheduling with priorities and dependencies
+- **SharedContext** (`src/coordinator/shared_context.rs`): Type-safe key-value storage with TTL and semantic search
+- **NotificationBus** (`src/coordinator/notification_bus.rs`): Pub/sub messaging with topic patterns and direct messaging
+- **Testing infrastructure** (`src/testing/`): Mock Redis, fixtures, and helpers
 
-### Key Capabilities
-- **TaskQueue**: Distributed task scheduling with priorities and dependencies
-- **SharedContext**: Type-safe key-value storage with TTL and semantic search
-- **NotificationBus**: Pub/sub messaging with topic patterns and direct messaging
-- **AgentRegistry**: Dynamic agent discovery and capability matching
+### Integration
+- Connects to the existing Redis service (port 6380) using agent-optimized config
+- Provides async Rust APIs complementing the Python agent-memory-server
+- Targets 100K+ tasks/second throughput
+- Supports both Windows Service and WSL deployment
 
-This framework represents the next evolution of the Redis Windows project, providing native performance for AI agent coordination while maintaining compatibility with existing infrastructure.
+### Building agent-sync
+```bash
+cd agent-sync
+cargo build --release
+cargo test
+cargo clippy -- -D warnings
+```
 
 ## Notes
 
