@@ -20,7 +20,27 @@
       "commit": "66be1eb",
       "agents_involved": ["claude-opus"],
       "summary": "Smart-debug: Fixed 50+ clippy errors across 13 files in agent-sync library. All builds clean (cargo clippy, cargo build, cargo check --features service, dotnet build)."
+    },
+    {
+      "id": "ctx-redis-windows-20260206c",
+      "file": "redis-windows-context-20260206c.md",
+      "created": "2026-02-06T17:17:00Z",
+      "project": "redis-windows",
+      "branch": "main",
+      "commit": "994cff8",
+      "agents_involved": ["claude-opus", "context7"],
+      "summary": "Fixed Redis Windows Service //?/ path bug, modernized deps (winapi→windows 0.58, windows-service 0.8, thiserror derive), fixed .gitignore masking src/bin/. 80 tests pass, clippy clean."
+    },
+    {
+      "id": "ctx-redis-windows-20260206d",
+      "file": "redis-windows-context-20260206d.md",
+      "created": "2026-02-06T17:50:00Z",
+      "project": "redis-windows",
+      "branch": "main",
+      "commit": "994cff8",
+      "agents_involved": ["claude-opus"],
+      "summary": "Redis 8.4.0 MSYS2 deployed as Windows Service. Fixed cygdrive path handling, config compatibility (activedefrag, active-rehashing, maxclients). Service running, PING→PONG, MCP server validated."
     }
   ],
-  "latest": "ctx-redis-windows-20260206b"
+  "latest": "ctx-redis-windows-20260206d"
 }
