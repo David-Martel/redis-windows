@@ -320,7 +320,7 @@ async fn notification_types_demo(
             "    📥 Received: {}",
             String::from_utf8_lossy(&received.payload)
         );
-        println!("    📍 Channel: {}", received.channel_name());
+        println!("    📍 Channel: {}", received.channel_name("example"));
     }
 
     notification_bus.unsubscribe(subscription_id).await?;
@@ -531,3 +531,4 @@ async fn show_statistics(
 
     Ok(())
 }
+

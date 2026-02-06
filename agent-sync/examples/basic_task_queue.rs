@@ -28,6 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         task_timeout_secs: 60,
         enable_metrics: true,
         notification_buffer_size: 100,
+        namespace: "test-queue".to_string(),
     };
 
     let coordinator = Coordinator::new(config).await?;
@@ -164,3 +165,6 @@ async fn demonstrate_error_handling() -> Result<(), Box<dyn std::error::Error>> 
 
     Ok(())
 }
+
+
+

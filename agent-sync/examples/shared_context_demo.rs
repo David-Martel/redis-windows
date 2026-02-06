@@ -7,7 +7,6 @@ use agent_sync::coordinator::{
     ContextData, ContextResult, ContextScope, Coordinator, CoordinatorConfig,
 };
 use agent_sync::{AgentId, SessionId};
-use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -42,12 +41,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔗 Session ID: {}", session_id);
 
     // Demonstrate different context scopes
-    demonstrate_global_context(&shared_context, agent1_id, agent2_id).await?;
-    demonstrate_session_context(&shared_context, agent1_id, session_id).await?;
-    demonstrate_agent_context(&shared_context, agent1_id, agent2_id).await?;
-    demonstrate_temporary_context(&shared_context, agent1_id).await?;
-    demonstrate_optimistic_locking(&shared_context, agent1_id, agent2_id).await?;
-    demonstrate_context_operations(&shared_context, agent1_id, session_id).await?;
+    demonstrate_global_context(shared_context, agent1_id, agent2_id).await?;
+    demonstrate_session_context(shared_context, agent1_id, session_id).await?;
+    demonstrate_agent_context(shared_context, agent1_id, agent2_id).await?;
+    demonstrate_temporary_context(shared_context, agent1_id).await?;
+    demonstrate_optimistic_locking(shared_context, agent1_id, agent2_id).await?;
+    demonstrate_context_operations(shared_context, agent1_id, session_id).await?;
 
     // Clean up
     coordinator.shutdown().await?;
@@ -59,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn demonstrate_global_context(
     shared_context: &agent_sync::coordinator::SharedContext,
     agent1_id: AgentId,
-    agent2_id: AgentId,
+    _agent2_id: AgentId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🌍 === Demonstrating Global Context ===");
 
@@ -262,7 +261,7 @@ async fn demonstrate_temporary_context(
 async fn demonstrate_optimistic_locking(
     shared_context: &agent_sync::coordinator::SharedContext,
     agent1_id: AgentId,
-    agent2_id: AgentId,
+    _agent2_id: AgentId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔒 === Demonstrating Optimistic Locking ===");
 

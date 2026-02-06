@@ -4,16 +4,13 @@
 //! and notification systems under various load conditions.
 
 use agent_sync::coordinator::{
-    ContextData, ContextResult, ContextScope, Coordinator, CoordinatorConfig, Notification,
+    ContextData, ContextScope, Coordinator, CoordinatorConfig, Notification,
     NotificationFilter, NotificationPriority, NotificationType, Task, TaskPriority, TaskResult,
-    TaskStatus,
 };
 use agent_sync::{AgentId, SessionId};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::collections::HashMap;
-use std::time::Duration;
 use tokio::runtime::Runtime;
-use uuid::Uuid;
 
 /// Benchmark configuration
 const REDIS_URL: &str = "redis://127.0.0.1:6379";
@@ -29,6 +26,7 @@ async fn create_test_coordinator() -> Coordinator {
         task_timeout_secs: 300,
         enable_metrics: false, // Disable for benchmarks
         notification_buffer_size: 1000,
+        namespace: "benchmark".to_string(),
     };
 
     Coordinator::new(config)
@@ -88,26 +86,17 @@ fn create_test_notifications(count: usize, agent_id: AgentId) -> Vec<Notificatio
                 agent_id,
             )
             .with_priority(match i % 4 {
-                0 => TaskPriority::Low.into(),
-                1 => TaskPriority::Normal.into(),
-                2 => TaskPriority::High.into(),
-                3 => TaskPriority::Critical.into(),
+                0 => NotificationPriority::Low,
+                1 => NotificationPriority::Normal,
+                2 => NotificationPriority::High,
+                3 => NotificationPriority::Critical,
                 _ => unreachable!(),
             })
         })
         .collect()
 }
 
-impl From<TaskPriority> for NotificationPriority {
-    fn from(task_priority: TaskPriority) -> Self {
-        match task_priority {
-            TaskPriority::Low => NotificationPriority::Low,
-            TaskPriority::Normal => NotificationPriority::Normal,
-            TaskPriority::High => NotificationPriority::High,
-            TaskPriority::Critical => NotificationPriority::Critical,
-        }
-    }
-}
+
 
 // Task Queue Benchmarks
 
@@ -554,7 +543,7 @@ fn bench_notification_bus_with_subscribers(c: &mut Criterion) {
 }
 
 fn bench_notification_filtering(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
+    let _rt = Runtime::new().unwrap();
     let agent_id = AgentId::new();
 
     let mut group = c.benchmark_group("notification_filtering");
@@ -758,3 +747,4 @@ criterion_group!(
 );
 
 criterion_main!(benches);
+
