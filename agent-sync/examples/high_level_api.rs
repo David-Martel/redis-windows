@@ -6,11 +6,10 @@
 //!   cargo run --example high_level_api
 
 use agent_sync::{
-    coordinator::{ContextData, ContextScope, TaskResult},
-    AgentCapabilities, AgentId, AgentSync, ConfigBuilder,
+    coordinator::{ContextData, TaskResult},
+    AgentCapabilities, AgentSync, ConfigBuilder,
 };
 use std::collections::HashMap;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

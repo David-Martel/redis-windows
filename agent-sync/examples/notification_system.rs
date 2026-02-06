@@ -11,7 +11,7 @@ use agent_sync::AgentId;
 use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 use uuid::Uuid;
 
 #[tokio::main]
@@ -46,11 +46,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("👤 Subscriber 3 Agent ID: {}", subscriber3_id);
 
     // Demonstrate basic pub-sub
-    basic_pubsub_demo(&notification_bus, publisher_id, subscriber1_id).await?;
+    basic_pubsub_demo(notification_bus, publisher_id, subscriber1_id).await?;
 
     // Demonstrate notification filtering
     filtering_demo(
-        &notification_bus,
+        notification_bus,
         publisher_id,
         subscriber1_id,
         subscriber2_id,
@@ -58,24 +58,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     // Demonstrate multiple notification types
-    notification_types_demo(&notification_bus, publisher_id, subscriber1_id).await?;
+    notification_types_demo(notification_bus, publisher_id, subscriber1_id).await?;
 
     // Demonstrate notification priorities
-    priority_demo(&notification_bus, publisher_id, subscriber1_id).await?;
+    priority_demo(notification_bus, publisher_id, subscriber1_id).await?;
 
     // Demonstrate broadcast to multiple subscribers
     broadcast_demo(
-        &notification_bus,
+        notification_bus,
         publisher_id,
         vec![subscriber1_id, subscriber2_id, subscriber3_id],
     )
     .await?;
 
     // Demonstrate system notifications
-    system_notifications_demo(&notification_bus, publisher_id, subscriber1_id).await?;
+    system_notifications_demo(notification_bus, publisher_id, subscriber1_id).await?;
 
     // Show final statistics
-    show_statistics(&notification_bus).await?;
+    show_statistics(notification_bus).await?;
 
     // Clean up
     coordinator.shutdown().await?;
