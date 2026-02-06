@@ -2,27 +2,27 @@
 
 ## Overview
 
-This guide explains how to configure and manage Redis in a hybrid WSL-Windows environment for optimal agent-memory-server performance.
+This guide explains how to configure and manage Redis in a hybrid WSL-Windows environment for optimal agent-sync performance.
 
 ## Current Setup
 
-- **WSL Redis**: Full-featured Linux Redis (version 7.0.15+)
-- **Windows Redis**: Your custom Windows service implementation
-- **Agent Memory Server**: Python application connecting to Redis on localhost:6379
+- **WSL Redis**: Full-featured Linux Redis (version 7.0.15+) on port 6379
+- **Windows Redis**: Custom Windows service on port 6380
+- **agent-sync**: Rust coordination library connecting to either instance
 
 ## Key Benefits of Hybrid Configuration
 
 ### WSL Redis Advantages
-- ✅ Full Redis feature set
-- ✅ No memory limitations
-- ✅ Standard Linux Redis behavior
-- ✅ Better ecosystem support
+- Full Redis feature set
+- No memory limitations
+- Standard Linux Redis behavior
+- Better ecosystem support
 
-### Windows Redis Advantages  
-- ✅ Native Windows service integration
-- ✅ Windows Event Log integration
-- ✅ Easier Windows deployment
-- ✅ Your custom optimizations
+### Windows Redis Advantages
+- Native Windows service integration
+- Windows Event Log integration
+- Easier Windows deployment
+- Agent-optimized configuration
 
 ## Configuration Files
 
@@ -34,14 +34,7 @@ Optimized Redis configuration with agent-specific settings:
 - Agent-optimized persistence settings
 - Enhanced keyspace notifications
 
-### 2. `optimize-wsl-redis.sh`
-Bash script to apply optimizations to WSL Redis:
-```bash
-# Run from Windows PowerShell
-wsl -e bash ./optimize-wsl-redis.sh
-```
-
-### 3. `redis-hybrid.ps1`
+### 2. `redis-hybrid.ps1`
 PowerShell management script for hybrid configuration:
 ```powershell
 # Check status
@@ -84,45 +77,29 @@ PowerShell management script for hybrid configuration:
 
 2. **Configure Windows Redis**:
    ```powershell
-   # Copy optimized config
    copy redis.hybrid.conf redis.conf
-   
-   # Install/start service
-   .\build.ps1 -InstallService
+   .\install-redis-service.ps1
    ```
 
 ### Option 3: Dual Configuration (Advanced)
 
 Run both Redis instances on different ports:
 
-1. **WSL Redis**: Keep on port 6379
-2. **Windows Redis**: Configure for port 6380
+1. **WSL Redis**: Port 6379 (development)
+2. **Windows Redis**: Port 6380 (agent workloads)
 
-Edit Windows `redis.conf`:
-```conf
-port 6380
-```
-
-Update agent-memory-server `.env`:
-```env
-# For WSL Redis
-REDIS_URL=redis://localhost:6379
-
-# For Windows Redis  
-REDIS_URL=redis://localhost:6380
+```bash
+# agent-sync connects to either
+REDIS_URL=redis://localhost:6379  # WSL dev
+REDIS_URL=redis://localhost:6380  # Windows agent
 ```
 
 ## Agent-Specific Optimizations
 
-The hybrid configuration includes these agent-optimized settings:
-
 ### Memory Management
 ```conf
-# 2GB limit for agent operations
 maxmemory 2gb
 maxmemory-policy allkeys-lru
-
-# Lazy freeing for large datasets
 lazyfree-lazy-eviction yes
 lazyfree-lazy-expire yes
 lazyfree-lazy-server-del yes
@@ -130,7 +107,6 @@ lazyfree-lazy-server-del yes
 
 ### Vector Storage Optimization
 ```conf
-# Active defragmentation for embedding vectors
 activedefrag yes
 active-defrag-ignore-bytes 100mb
 active-defrag-threshold-lower 10
@@ -139,30 +115,21 @@ active-defrag-threshold-upper 100
 
 ### Session Persistence
 ```conf
-# Frequent saves for agent sessions
 save 900 1 300 10 60 1000
-
-# AOF for session durability
 appendonly yes
 appendfsync everysec
 ```
 
 ### Event Notifications
 ```conf
-# Enable expiration events for session cleanup
 notify-keyspace-events "Ex"
 ```
 
 ### Connection Optimization
 ```conf
-# Higher timeout for agent processing
 timeout 300
-
-# More I/O threads for concurrency
 io-threads 4
 io-threads-do-reads yes
-
-# Increased client limits
 maxclients 1000
 ```
 
@@ -170,9 +137,8 @@ maxclients 1000
 
 ### Connection Test
 ```powershell
-# Test from agent-memory-server directory
-cd C:\Users\david\agent-memory-server
-.\.venv\Scripts\python.exe -c "import redis; r = redis.Redis(); print('Connected:', r.ping())"
+redis-cli -p 6379 ping   # WSL
+redis-cli -p 6380 ping   # Windows
 ```
 
 ### Performance Monitoring
@@ -180,68 +146,33 @@ cd C:\Users\david\agent-memory-server
 # WSL Redis monitoring
 wsl -e redis-cli info memory
 wsl -e redis-cli info stats
-wsl -e redis-cli info clients
-
-# Check slow queries
 wsl -e redis-cli slowlog get 10
-```
 
-### Agent Memory Server Test
-```powershell
-# Start agent memory server
-cd C:\Users\david\agent-memory-server
-.\.venv\Scripts\activate
-python -m agent_memory_server.cli api --port 8000
-
-# Test MCP integration
-python -m agent_memory_server.cli mcp --mode stdio
+# Windows Redis monitoring
+redis-cli -p 6380 info memory
+redis-cli -p 6380 info stats
 ```
 
 ## Troubleshooting
 
 ### Port Conflicts
-```
-Error: "Address already in use"
-```
-**Solution**: Only one Redis can use port 6379
 ```powershell
 .\redis-hybrid.ps1 status  # Check what's running
-.\redis-hybrid.ps1 switch-to-wsl  # Switch to WSL
+netstat -an | findstr ":6379"
+netstat -an | findstr ":6380"
 ```
 
 ### WSL Redis Won't Start
 ```bash
-# Check WSL Redis status
 wsl -e sudo systemctl status redis-server
-
-# Check configuration
 wsl -e redis-server --test-config -c /etc/redis/redis.conf
-
-# View logs
 wsl -e sudo journalctl -u redis-server -f
 ```
 
-### Agent Memory Server Connection Failed
-```
-ConnectionError: Error connecting to Redis
-```
-**Solutions**:
+### agent-sync Connection Failed
 1. Check Redis is running: `.\redis-hybrid.ps1 status`
-2. Verify port: Check `REDIS_URL` in `.env`
-3. Test connection: `wsl -e redis-cli ping`
-
-### Performance Issues
-```bash
-# Check memory usage
-wsl -e redis-cli info memory
-
-# Monitor slow operations
-wsl -e redis-cli config set slowlog-log-slower-than 1000
-wsl -e redis-cli slowlog get 5
-
-# Check fragmentation
-wsl -e redis-cli info memory | grep fragmentation
-```
+2. Verify REDIS_URL environment variable
+3. Test connection: `redis-cli -p <port> ping`
 
 ## Best Practices
 
@@ -249,29 +180,21 @@ wsl -e redis-cli info memory | grep fragmentation
 1. Use WSL Redis for development (full features, no limits)
 2. Apply agent optimizations with `redis-hybrid.ps1 wsl`
 3. Monitor performance with Redis CLI commands
-4. Test agent-memory-server integration regularly
+4. Run agent-sync tests against both instances
 
 ### Production Deployment
-1. Switch to Windows Redis for production (`switch-to-windows`)
+1. Switch to Windows Redis (`switch-to-windows`)
 2. Use Windows service management features
 3. Configure Windows Event Log monitoring
 4. Implement backup strategies for agent data
 
-### Configuration Management
-1. Keep `redis.hybrid.conf` as the optimized template
-2. Use version control for configuration changes
-3. Test configurations before applying to production
-4. Document any custom modifications
-
-## Integration with Agent Memory Server
+## Integration with agent-sync
 
 The hybrid configuration ensures optimal performance for:
 
-- **Session Storage**: Fast working memory operations
-- **Vector Operations**: Efficient embedding storage and retrieval  
-- **Memory Management**: LRU eviction for session cleanup
-- **Persistence**: Durable storage for long-term memories
-- **Notifications**: Event-driven session expiration
+- **Task Distribution**: Fast task queue operations across agents
+- **Shared Context**: Efficient key-value storage with TTL
+- **Pub/Sub Notifications**: Low-latency inter-agent messaging
+- **Agent Registry**: Liveness tracking and capability discovery
+- **Persistence**: Durable storage for agent state
 - **Concurrency**: Multiple agent sessions simultaneously
-
-This setup provides the best balance of development flexibility and production reliability for your agent memory system.

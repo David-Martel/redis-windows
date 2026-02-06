@@ -20,8 +20,8 @@ This guide explains how to run both WSL Redis and Windows Redis simultaneously o
 │  ├─ Service: systemctl         ├─ Service: Windows Service  │
 │  └─ Use: Development/Testing   └─ Use: Production/Staging   │
 │                                                             │
-│                    Agent Memory Server                      │
-│                    ├─ Can connect to either                │
+│                    agent-sync (Rust lib)                    │
+│                    ├─ Connects to either instance          │
 │                    ├─ WSL: redis://localhost:6379          │
 │                    └─ Windows: redis://localhost:6380      │
 └─────────────────────────────────────────────────────────────┘
@@ -71,7 +71,7 @@ This guide explains how to run both WSL Redis and Windows Redis simultaneously o
 .\manage-dual-redis.ps1 -Action test
 ```
 
-### 5. Configure Agent Memory Server
+### 5. Configure Agent Target
 
 ```powershell
 # For development (WSL Redis)
@@ -184,18 +184,16 @@ redis-cli -p 6379 get "test-key"  # Should return: wsl-value
 redis-cli -p 6380 get "test-key"  # Should return: windows-value
 ```
 
-### Agent Memory Server Testing
+### agent-sync Connection Testing
 
-```powershell
-# Switch to WSL Redis and test
-.\configure-agent-redis.ps1 -Target wsl
-cd C:\Users\david\agent-memory-server
-.venv\Scripts\activate
-python -c "import redis; r = redis.Redis(host='localhost', port=6379); print('WSL Redis:', r.ping())"
+```rust
+// Test WSL Redis connection
+let config = Config::builder().redis_url("redis://localhost:6379").build()?;
+let client = AgentSync::new(config).await?;
 
-# Switch to Windows Redis and test
-.\configure-agent-redis.ps1 -Target windows
-python -c "import redis; r = redis.Redis(host='localhost', port=6380); print('Windows Redis:', r.ping())"
+// Test Windows Redis connection
+let config = Config::builder().redis_url("redis://localhost:6380").build()?;
+let client = AgentSync::new(config).await?;
 ```
 
 ## Configuration Files
@@ -249,34 +247,18 @@ supervised no
 daemonize no
 ```
 
-## Agent Memory Server Configuration
+## agent-sync Configuration
 
-### Environment File Location
+### Development (WSL Redis)
 
-`C:\Users\david\agent-memory-server\.env`
-
-### Development Configuration (WSL Redis)
-
-```ini
+```bash
 REDIS_URL=redis://localhost:6379
-PORT=8000
-LONG_TERM_MEMORY=true
-WINDOW_SIZE=12
-GENERATION_MODEL=gpt-4o-mini
-EMBEDDING_MODEL=text-embedding-3-small
-DISABLE_AUTH=true
 ```
 
-### Production Configuration (Windows Redis)
+### Production (Windows Redis)
 
-```ini
+```bash
 REDIS_URL=redis://localhost:6380
-PORT=8000
-LONG_TERM_MEMORY=true
-WINDOW_SIZE=12
-GENERATION_MODEL=gpt-4o-mini
-EMBEDDING_MODEL=text-embedding-3-small
-DISABLE_AUTH=true
 ```
 
 ## Use Cases
@@ -289,40 +271,38 @@ DISABLE_AUTH=true
    .\manage-dual-redis.ps1 -Action start -Target wsl
    ```
 
-2. Configure agent for development:
+2. Configure agent target:
 
    ```powershell
    .\configure-agent-redis.ps1 -Target wsl
    ```
 
-3. Start agent memory server:
+3. Build and test agent-sync:
 
-   ```powershell
-   cd C:\Users\david\agent-memory-server
-   .venv\Scripts\activate
-   python -m agent_memory_server.cli api --port 8000
+   ```bash
+   cd agent-sync
+   cargo test
    ```
 
 ### Production Testing
 
-1. Start Windows Redis for production testing:
+1. Start Windows Redis for production:
 
    ```powershell
    .\manage-dual-redis.ps1 -Action start -Target windows
    ```
 
-2. Configure agent for production:
+2. Configure agent target:
 
    ```powershell
    .\configure-agent-redis.ps1 -Target windows
    ```
 
-3. Start agent memory server:
+3. Run agent-sync benchmarks:
 
-   ```powershell
-   cd C:\Users\david\agent-memory-server
-   .venv\Scripts\activate
-   python -m agent_memory_server.cli api --port 8000
+   ```bash
+   cd agent-sync
+   cargo bench
    ```
 
 ### Simultaneous Testing
@@ -395,7 +375,7 @@ Get-Service Redis -ErrorAction SilentlyContinue
 .\manage-dual-redis.ps1 -Action optimize
 ```
 
-#### Issue: Agent Memory Server connection fails
+#### Issue: agent-sync connection fails
 
 **Solution**:
 

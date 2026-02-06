@@ -1,208 +1,189 @@
-# Redis for Windows - LLM Agent Ready
+# Redis for Windows - LLM Agent Coordination
 
-**A production-ready Redis server for Windows with native LLM agent integration and memory management capabilities.**
+A production-ready Redis 8.4.0 server for Windows, wrapped in a .NET 8 Windows Service, with a high-performance Rust coordination library (`agent-sync`) for LLM agents.
 
-## 🤖 Built for LLM Agents
+## Architecture
 
-This project provides a high-performance Redis setup specifically optimized for:
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   LLM Agents    │───▶│   agent-sync    │───▶│  Redis Server   │
+│ (Claude, GPT,   │    │   (Rust lib)    │    │  (Windows Svc)  │
+│  local models)  │    │                 │    │  Port 6380      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                        Distributed tasks
+                        Shared context
+                        Pub/sub notifications
+                        Agent registry
+```
 
-- **Agent Memory Management** - Working and long-term memory for AI agents
-- **Vector Storage & Retrieval** - Optimized for embedding and semantic search
-- **Session Management** - Isolated contexts for multiple agent sessions  
-- **Real-time Performance** - Low-latency responses for agent workflows
-- **Production Deployment** - Windows service with enterprise features
+## Components
 
-## 🔗 Agent-Memory-Server Integration
+| Component | Technology | Status |
+|-----------|-----------|--------|
+| Redis Server | Redis 8.4.0 (upstream merged) | Production |
+| Windows Service | .NET 8 BackgroundService | Production |
+| agent-sync | Rust async library | Development |
+| Build System | PowerShell + GitHub Actions | Production |
 
-Seamlessly integrates with [agent-memory-server](https://github.com/david-t-martel/agent-memory-server) to provide:
-
-- **Conversational Memory** - Automatic summarization and context management
-- **Semantic Search** - Vector-based memory retrieval 
-- **Multi-Session Support** - Isolated memory per agent session
-- **REST & MCP APIs** - Multiple integration options for different agent frameworks
-- **Background Processing** - Async memory compaction and optimization
-
-## 🚀 Quick Start for Agents
+## Quick Start
 
 ```powershell
-# Clone and setup
+# Clone and build
 git clone https://github.com/david-t-martel/redis-windows.git
 cd redis-windows
 
-# Setup for LLM agents (one command)
-.\build.ps1 -PrepareForAgents
+# Build .NET service
+dotnet build RedisService.csproj -c Release
 
-# Start Redis service
+# Install as Windows service (admin required)
+.\install-redis-service.ps1
+
+# Start Redis
 net start Redis
 
-# Your agents can now connect to:
-# Redis: redis://localhost:6379
-# Agent Memory API: http://localhost:8000
-# Agent Memory MCP: ws://localhost:8001
+# Verify
+redis-cli.exe -p 6380 ping   # PONG
 ```
 
-## 📋 What You Get
+## Agent Integration (Rust)
 
-### Core Components
-- **Redis Server** (`redis-server.exe`) - High-performance data store
-- **Redis CLI** (`redis-cli.exe`) - Command-line interface
-- **Windows Service** (`RedisService.exe`) - Reliable background operation
-- **Agent Configuration** (`redis-agent.conf`) - Optimized for agent workloads
+The `agent-sync` crate provides distributed coordination primitives for AI agents:
 
-### Agent Integration
-- **Memory Server Integration** - Automatic setup of agent-memory-server
-- **Optimized Configurations** - Pre-tuned for LLM agent access patterns
-- **Development Tools** - VS Code tasks, debugging, and monitoring
-- **Production Features** - Logging, security, and performance monitoring
-
-## 🛠️ Build Options
-
-### Interactive Setup
-```powershell
-.\build.ps1
-# Choose from menu options including agent preparation
+```toml
+[dependencies]
+agent-sync = "0.1.0"
 ```
 
-### Direct Commands
-```powershell
-# Prepare for agents (includes Redis + agent-memory-server)
-.\build.ps1 -PrepareForAgents
+```rust
+use agent_sync::{AgentSync, Config};
 
-# Build Redis service only
-.\build.ps1 -BuildOnly
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let config = Config::builder()
+        .redis_url("redis://localhost:6380")
+        .build()?;
+    let client = AgentSync::new(config).await?;
 
-# Download latest release
-.\build.ps1 -CheckLatestRelease
+    // Submit a task
+    let task_id = client.task_queue().submit("process_data", payload).await?;
 
-# Setup agent-memory-server integration
-.\build.ps1 -ConfigureMemoryServer
+    // Share context between agents
+    client.shared_context().set("key", value).await?;
 
-# Trigger GitHub workflow to build Redis
-.\build.ps1 -GitHubWorkflow
-```
+    // Subscribe to notifications
+    client.notification_bus().subscribe("topic.*").await?;
 
-## 🔧 Agent Configuration
-
-### Environment Variables
-```bash
-REDIS_URL=redis://localhost:6379
-AGENT_MEMORY_API_URL=http://localhost:8000
-AGENT_MEMORY_MCP_URL=ws://localhost:8001
-```
-
-### Python Agent Example
-```python
-from agent_memory_client import MemoryClient
-import redis
-
-# Redis direct access
-redis_client = redis.Redis(host='localhost', port=6379)
-
-# Agent memory server
-memory_client = MemoryClient(api_url='http://localhost:8000')
-
-# Store conversation memory
-memory_client.store_working_memory(
-    session_id="agent_session_1",
-    messages=[{"role": "user", "content": "Hello"}]
-)
-```
-
-### MCP Integration
-```json
-{
-  "mcpServers": {
-    "agent-memory": {
-      "command": "agent-memory-server",
-      "args": ["run-mcp"],
-      "env": {
-        "REDIS_URL": "redis://localhost:6379"
-      }
-    }
-  }
+    Ok(())
 }
 ```
 
-## 📖 Documentation
+### Core Capabilities
 
-- **[Agent Integration Guide](AGENT_INTEGRATION_GUIDE.md)** - Complete guide for LLM agent developers
-- **[Quick Start Guide](QUICKSTART.md)** - Get running in 5 minutes
-- **[Setup Guide](SETUP_GUIDE.md)** - Detailed installation and configuration
-- **[Project Status](PROJECT_STATUS.md)** - Current features and roadmap
+- **TaskQueue** - Priority-based distributed task scheduling with dependencies
+- **SharedContext** - Type-safe key-value storage with TTL and semantic search
+- **NotificationBus** - Pub/sub messaging with topic patterns and direct messaging
+- **AgentRegistry** - Agent liveness tracking with heartbeats and capabilities
 
-## 🏗️ Architecture
+### Building agent-sync
 
-```text
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   LLM Agent     │───▶│ Agent Memory    │───▶│ Redis Server    │
-│   (Claude,      │    │ Server          │    │ (This Project)  │
-│   GPT, etc.)    │    │ (Python/FastAPI)│    │ (C#/.NET)       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌─────────────────┐
-                       │ Vector Store    │
-                       │ (Redis/Other)   │
-                       └─────────────────┘
+```bash
+cd agent-sync
+cargo build --release
+cargo test
+cargo clippy -- -D warnings
 ```
 
-## ⚡ Performance Features
+See [`agent-sync/README.md`](agent-sync/README.md) for full API documentation.
 
-- **Memory Optimization** - Configured for high-throughput agent workloads
-- **Lazy Freeing** - Non-blocking memory cleanup
-- **Active Defragmentation** - Automatic memory optimization
-- **Connection Pooling** - Efficient multi-agent connection handling
-- **Background Persistence** - Non-blocking data durability
+## Redis Configuration
 
-## 🔒 Security Features
+### Dual Instance Strategy
 
-- **Authentication** - Redis password protection
-- **Network Security** - Configurable bind addresses
-- **Windows Integration** - Event log monitoring
-- **Agent Isolation** - Session-based memory separation
-- **OAuth2 Support** - Via agent-memory-server integration
+| Instance | Port | Purpose | Config |
+|----------|------|---------|--------|
+| Windows Service | 6380 | Production agent workloads | `redis-agent.conf` |
+| WSL Redis | 6379 | Development / testing | System default |
 
-## 🏢 Production Ready
+```powershell
+# Manage both instances
+.\manage-dual-redis.ps1 -Action status
+.\manage-dual-redis.ps1 -Action start -Target both
 
-### Windows Service
-- **Automatic Startup** - Starts with Windows
-- **Process Management** - Automatic restart on failure  
-- **Event Logging** - Integrated with Windows Event Log
-- **Performance Monitoring** - Built-in metrics and alerts
+# Switch agent target
+.\configure-agent-redis.ps1 -Target windows   # Port 6380
+.\configure-agent-redis.ps1 -Target wsl        # Port 6379
+```
 
-### Monitoring & Debugging
-- **VS Code Integration** - Full debugging support
-- **Performance Metrics** - Redis INFO and slow log
-- **Health Checks** - Service status monitoring
-- **Log Management** - Structured logging for troubleshooting
+### Agent-Optimized Settings (`redis-agent.conf`)
 
-## 🤝 Contributing
+```conf
+maxmemory 2gb
+maxmemory-policy allkeys-lru
+lazyfree-lazy-eviction yes
+activedefrag yes
+proto-max-bulk-len 512mb
+notify-keyspace-events "Ex"
+appendonly yes
+```
 
-We welcome contributions, especially for:
+## Build Options
+
+```powershell
+# Interactive menu
+.\build.ps1
+
+# Direct commands
+.\build.ps1 -BuildOnly               # Build .NET service
+.\build.ps1 -CheckLatestRelease      # Check GitHub releases
+.\build.ps1 -DownloadOnly            # Download Redis binaries
+.\build.ps1 -GitHubWorkflow          # Trigger CI build
+```
+
+## Monitoring
+
+```powershell
+redis-cli.exe -p 6380 info memory
+redis-cli.exe -p 6380 info clients
+redis-cli.exe --latency-history -p 6380
+Get-EventLog -LogName Application -Source "Redis*" -Newest 10
+```
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Setup Guide](SETUP_GUIDE.md) | Detailed installation and configuration |
+| [Quick Start](QUICKSTART.md) | Get running in 5 minutes |
+| [Dual Redis Guide](DUAL_REDIS_GUIDE.md) | WSL + Windows dual instance setup |
+| [agent-sync README](agent-sync/README.md) | Rust library API and architecture |
+| [agent-sync Testing](RUST_TESTING_STRATEGY.md) | Testing strategy for agent-sync |
+
+## Dependencies
+
+### Required
+- **.NET SDK 8.0** - Windows service wrapper
+- **Redis binaries** - Auto-downloaded from GitHub releases
+- **PowerShell 5.1+** - Build scripts
+
+### Optional
+- **Rust 1.75+** - For building agent-sync
+- **GitHub CLI** - Release management
+- **Administrator privileges** - Service installation
+
+## Contributing
+
+Contributions welcome, especially for:
 - Agent framework integrations
 - Performance optimizations
+- Cross-platform testing
 - Documentation improvements
-- Testing and validation
 
-## 📄 License
+## License
 
-This project is licensed under the same terms as Redis - see [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **Redis Team** - For the amazing Redis database
-- **Microsoft** - For .NET hosting services
-- **Agent Memory Server** - For the Python memory management framework
-
----
-
-**Ready to power your AI agents with high-performance memory? Get started with the [Agent Integration Guide](AGENT_INTEGRATION_GUIDE.md)!**
-
+This project is licensed under the same terms as Redis - see [LICENSE](LICENSE) for details.
 
 ## Disclaimer
 
 This GitHub organization and its repositories are not affiliated with, endorsed by, or sponsored by Redis Ltd. The license provided here applies only to the content of this repository, and does not apply to the official [Redis](https://github.com/redis/redis) project or its software.
 
 We suggest that you use it for local development and follow Redis official guidance to deploy it on Linux for production environment. This project doesn't bear any responsibility for any losses caused by using it and is only for learning and exchange purposes.
-
-

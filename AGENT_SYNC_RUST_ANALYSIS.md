@@ -13,11 +13,11 @@ This analysis provides a comprehensive blueprint for implementing `agent-sync`, 
 - **Persistence**: Hybrid RDB snapshots + AOF logging
 - **Optimization Focus**: Vector storage, agent workloads, memory efficiency
 
-### Agent Memory Server Integration
-- **Technology Stack**: Python-based REST API and MCP interfaces
-- **Connection Pattern**: Client-side Redis connections
-- **Data Patterns**: Working memory, long-term memory, semantic search
-- **Ports**: API on 8000, MCP on 8001
+### Agent Integration (agent-sync Rust Library)
+- **Technology Stack**: Async Rust with redis 0.32, tokio 1.35, bb8 0.9 connection pooling
+- **Connection Pattern**: Pooled async Redis connections via bb8-redis
+- **Data Patterns**: Task queues, shared context, pub/sub notifications, agent registry
+- **Port**: 6380 (agent-optimized Redis)
 
 ## 1. Integration Patterns with Existing Redis Windows Service
 
@@ -40,7 +40,7 @@ This analysis provides a comprehensive blueprint for implementing `agent-sync`, 
 - Maintains existing Redis Windows service stability
 - Independent scaling and deployment
 - Clear separation of concerns
-- Compatible with agent-memory-server architecture
+- Replaces the deprecated Python agent-memory-server with native Rust coordination
 - Supports multiple agent types and frameworks
 
 ### Integration Strategy

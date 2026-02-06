@@ -4,22 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Redis for Windows with native LLM agent integration - a production-ready Redis server wrapped in a .NET 8 Windows Service, optimized for agent memory management and vector storage.
+Redis 8.4.0 for Windows wrapped in a .NET 8 Windows Service, with `agent-sync` - a high-performance Rust library for distributed LLM agent coordination via Redis.
 
 ## Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   LLM Agents    │───▶│ Agent Memory    │───▶│ Redis Service   │
-│ (Claude/GPT)    │    │ Server (Python) │    │ (This Project)  │
+│   LLM Agents    │───▶│   agent-sync    │───▶│  Redis Server   │
+│ (Claude, GPT,   │    │   (Rust lib)    │    │  Windows Svc    │
+│  local models)  │    │                 │    │  Port 6380      │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │                       │
-                    MCP/REST API            Port 6379/6380
 ```
 
 **Core Components:**
 - `.NET 8 Windows Service` (Program.cs) - Wraps redis-server.exe with Windows integration
-- `Redis Configurations` - Agent-optimized settings (redis-agent.conf)
+- `agent-sync` (Rust) - Distributed coordination: task queues, shared context, pub/sub, agent registry
+- `Redis Configurations` - Agent-optimized settings (redis-agent.conf, port 6380)
 - `PowerShell Build System` - Automated setup and deployment
 - `Dual Redis Support` - WSL (dev, port 6379) and Windows (prod, port 6380)
 
@@ -36,10 +36,12 @@ dotnet publish RedisService.csproj -c Release -r win-x64 --self-contained -o pub
 
 # Download Redis binaries
 .\build.ps1 -DownloadOnly
-.\build-modular.ps1 -DownloadBinaries
 
-# Setup for LLM agents (includes agent-memory-server)
-.\build.ps1 -PrepareForAgents
+# Build agent-sync Rust library
+cd agent-sync
+cargo build --release
+cargo test
+cargo clippy -- -D warnings
 ```
 
 ### Running Redis
@@ -62,11 +64,8 @@ net start Redis
 
 ### Testing
 ```powershell
-# Test connection
+# Test Redis connection
 redis-cli.exe -p 6380 ping
-
-# Run comprehensive tests
-.\build.ps1 -TestRedis
 
 # Check service status
 Get-Service Redis
@@ -75,19 +74,9 @@ Get-EventLog -LogName Application -Source "Redis*" -Newest 5
 # Performance monitoring
 redis-cli.exe --latency-history -p 6380
 redis-cli.exe info memory
-```
 
-### Agent Memory Server Integration
-```powershell
-# Setup UV environment for Python agents
-.\build.ps1 -SetupUvEnvironment
-
-# Configure agent memory server
-.\build.ps1 -ConfigureMemoryServer
-
-# Test agent integration
-curl http://localhost:8000/health
-uv run python -m agent_memory_server.cli mcp --mode stdio
+# Run agent-sync tests
+cd agent-sync && cargo test
 ```
 
 ## High-Level Architecture
@@ -96,7 +85,7 @@ uv run python -m agent_memory_server.cli mcp --mode stdio
 - **BackgroundService Pattern**: Manages Redis process lifecycle
 - **Windows Service Integration**: Runs as system service with event logging
 - **Path Translation**: MSYS2/Cygwin compatibility for Redis executable
-- **Process Monitoring**: Automatic restart on failure
+- **Graceful Shutdown**: redis-cli SHUTDOWN + process termination with timeout
 
 ### Configuration Strategy
 ```
@@ -106,149 +95,84 @@ redis.hybrid.conf    - Comprehensive reference configuration
 redis.conf          - Minimal default configuration
 ```
 
-**Agent Optimizations in redis-agent.conf:**
-- `maxmemory 2gb` with `allkeys-lru` eviction
-- `proto-max-bulk-len 512mb` for large agent data
-- `activedefrag yes` for memory efficiency
-- `notify-keyspace-events "Ex"` for monitoring
-- Persistence: RDB snapshots + AOF for durability
-
-### Build System Architecture
-- **build.ps1**: Main script with GitHub integration, UV support, interactive menu
-- **build-modular.ps1**: Simplified modular approach
+### Build System
+- **build.ps1**: Main script with GitHub integration, interactive menu
 - **install-redis-service.ps1**: Professional service installation with ACLs
 - **configure-agent-redis.ps1**: Switch between Redis instances
 - **manage-dual-redis.ps1**: Dual instance orchestration
 
-### Agent Integration Points
-1. **MCP Server** (Port 8001): Claude Desktop integration via stdio
-2. **REST API** (Port 8000): HTTP endpoints for memory operations
-3. **Direct Redis** (6379/6380): Low-level access for custom implementations
+## Agent-Sync Rust Library
 
-### Memory Architecture for Agents
-- **Working Memory**: Session-scoped conversation storage
-- **Long-term Memory**: Persistent knowledge across sessions
-- **Vector Storage**: Embeddings with semantic search
-- **Session Isolation**: Multi-agent support with isolated contexts
+The `agent-sync` crate (`agent-sync/`) is the primary agent integration layer.
+
+### Core Modules
+- **TaskQueue** (`src/coordinator/task_queue.rs`): Distributed task scheduling with priorities and dependencies
+- **SharedContext** (`src/coordinator/shared_context.rs`): Type-safe key-value storage with TTL
+- **NotificationBus** (`src/coordinator/notification_bus.rs`): Pub/sub messaging with topic patterns
+- **AgentRegistry** (`src/coordinator/agent_registry.rs`): Agent liveness, heartbeats, capability discovery
+- **ConnectionPool** (`src/connection/mod.rs`): bb8 connection pooling
+- **Platform** (`src/platform/mod.rs`): Windows/WSL/Linux abstractions
+
+### Key Dependencies
+```toml
+redis = "0.32"         # Redis client with async support
+tokio = "1.35"         # Async runtime
+bb8 = "0.9"            # Connection pooling
+bb8-redis = "0.24"     # Redis adapter for bb8
+thiserror = "2.0"      # Error handling
+serde = "1.0"          # Serialization
+tracing = "0.1"        # Structured logging
+```
+
+### Performance Targets
+- Task submission: < 1ms
+- Context retrieval: < 500us
+- Notification broadcast: < 100us
+- Throughput: 100K+ tasks/second
 
 ## Key Implementation Details
 
-### Windows Service Implementation
-The service wrapper (`Program.cs`) uses .NET's hosted service model:
+### Windows Service (Program.cs)
 - Converts Windows paths to Unix-style for MSYS2 Redis executable
 - Redirects stdout/stderr to Windows Event Log
-- Implements graceful shutdown with process cleanup
+- Implements async graceful shutdown (TryGracefulShutdownAsync + WaitForExitAsync)
 - Monitors Redis health and auto-recovers on failure
 
 ### Dual Redis Strategy
 - **Development**: WSL Redis on port 6379 (faster startup, Linux-native)
 - **Production**: Windows Service on port 6380 (integrated monitoring, auto-start)
-- Both can run simultaneously without conflicts
-- Configuration switching via `configure-agent-redis.ps1`
-
-### Agent Memory Server Integration
-- UV-managed Python environment at `C:\users\david\.venv`
-- Environment variables in `C:\Users\david\agent-memory-server\.env`
-- MCP configuration in Claude Desktop's `claude_desktop_config.json`
-- Automatic setup via `.\build.ps1 -PrepareForAgents`
-
-### Performance Optimizations
-- Active defragmentation for memory efficiency
-- Lazy freeing for non-blocking operations
-- Optimized data structures for agent workloads
-- Connection pooling with 10000 max clients
-- Background persistence (RDB + AOF)
+- Both run simultaneously without conflicts
 
 ## Project Dependencies
 
 ### Required
-- **.NET SDK 8.0** - For building Windows service
+- **.NET SDK 8.0** - Windows service (Hosting.WindowsServices 8.0.1)
+- **Rust 1.75+** - agent-sync library
 - **Redis binaries** - Auto-downloaded from GitHub releases
-- **PowerShell 5.1+** - For build scripts
+- **PowerShell 5.1+** - Build scripts
 
 ### Optional
-- **UV Package Manager** - For Python agent integration
-- **GitHub CLI** - For release management
-- **Python 3.11+** - For agent-memory-server
-- **Administrator privileges** - For service installation
+- **GitHub CLI** - Release management
+- **Administrator privileges** - Service installation
 
 ## Service Management
 
-### Installation
-```powershell
-# Install service (requires admin)
-.\install-redis-service.ps1
-
-# Custom installation
-.\install-redis-service.ps1 -ServiceName "RedisAgent" -ConfigFile "redis-agent.conf"
-```
-
 ### Monitoring
-- Windows Event Log: `Application` log with source "Redis Service"
-- Redis logs: Configured location in redis-agent.conf
-- Performance metrics: `redis-cli.exe info`
-- Slow query log: Configured at 10ms threshold
+- Windows Event Log: `Application` source "Redis Service"
+- Redis metrics: `redis-cli.exe -p 6380 info`
+- Slow query log: 10ms threshold
 
 ### Troubleshooting
 ```powershell
-# Check both Redis instances
 .\manage-dual-redis.ps1 -Action status
-
-# View service logs
 Get-EventLog -LogName Application -Source "Redis*" -Newest 20
-
-# Test connectivity
 redis-cli.exe -p 6380 ping
 Test-NetConnection localhost -Port 6380
-
-# Restart service
-net stop Redis
-net start Redis
-```
-
-## Configuration Files
-
-### Key Settings for Agent Workloads
-- **Memory**: 2GB limit with LRU eviction
-- **Persistence**: Dual strategy (RDB + AOF)
-- **Network**: Localhost only, ports 6379/6380
-- **Buffers**: Optimized for large agent payloads
-- **Monitoring**: Keyspace events and slow query logging
-
-### Environment Variables
-- `REDIS_URL`: Connection string for agent-memory-server
-- `OPENAI_API_KEY`: Required for embedding generation
-- `PORT`/`MCP_PORT`: API and MCP server ports
-
-## Agent-Sync Rust Framework
-
-The `agent-sync` crate (`agent-sync/`) provides high-performance distributed coordination primitives for AI agents using Redis as the backbone.
-
-### Current Implementation
-- **TaskQueue** (`src/coordinator/task_queue.rs`): Distributed task scheduling with priorities and dependencies
-- **SharedContext** (`src/coordinator/shared_context.rs`): Type-safe key-value storage with TTL and semantic search
-- **NotificationBus** (`src/coordinator/notification_bus.rs`): Pub/sub messaging with topic patterns and direct messaging
-- **Testing infrastructure** (`src/testing/`): Mock Redis, fixtures, and helpers
-
-### Integration
-- Connects to the existing Redis service (port 6380) using agent-optimized config
-- Provides async Rust APIs complementing the Python agent-memory-server
-- Targets 100K+ tasks/second throughput
-- Supports both Windows Service and WSL deployment
-
-### Building agent-sync
-```bash
-cd agent-sync
-cargo build --release
-cargo test
-cargo clippy -- -D warnings
 ```
 
 ## Notes
 
-- Service runs as "Redis Server" by default
-- Configuration file path can be specified with `-c` parameter
-- Agent configuration (`redis-agent.conf`) is optimized for LLM workloads
-- Both WSL and Windows Redis can run simultaneously on different ports
-- The system is designed for persistent agent memory with semantic search capabilities
-- The `agent-sync` Rust framework extends capabilities for high-performance agent coordination
+- Service name: "Redis Server"
+- Config path specified with `-c` parameter
+- Agent config (`redis-agent.conf`) is the primary production config
+- Python usage: always `uv run python`, never bare `python`/`pip`

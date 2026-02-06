@@ -1,404 +1,207 @@
 # LLM Agent Integration Guide
 
-This document explains how to integrate Redis for Windows with LLM agents and the agent-memory-server project.
-
 ## Overview
 
-This Redis setup is optimized for LLM agent workloads with:
-- **High-performance memory management** for vector storage and retrieval
-- **Agent-memory-server integration** for conversational and long-term memory
-- **Windows-specific optimizations** for reliable service operation
-- **Security configurations** suitable for production agent deployments
+This Redis setup is optimized for LLM agent workloads with the `agent-sync` Rust library providing high-performance coordination primitives on top of Redis.
 
 ## Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   LLM Agent     │───▶│ Agent Memory    │───▶│ Redis Server    │
-│   (Claude,      │    │ Server          │    │ (This Project)  │
-│   GPT, etc.)    │    │ (Python/REST)   │    │ (C#/.NET)       │
+│   LLM Agents    │───▶│   agent-sync    │───▶│  Redis Server   │
+│ (Claude, GPT,   │    │   (Rust lib)    │    │  Port 6380      │
+│  local models)  │    │                 │    │  Windows Svc    │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌─────────────────┐
-                       │ Vector Store    │
-                       │ (Redis/Other)   │
-                       └─────────────────┘
+                        Task queues
+                        Shared context
+                        Pub/sub notifications
+                        Agent registry
 ```
 
-## Quick Setup for Agents
+## Quick Setup
 
 ### 1. Install Redis Service
 
 ```powershell
 # Build and install Redis service
-.\build.ps1 -PrepareForAgents
+.\build.ps1 -BuildOnly
+.\install-redis-service.ps1
 
-# Or run interactively and choose option 9
-.\build.ps1
-```
-
-### 2. Configure Agent Memory Server
-
-```powershell
-# Setup agent-memory-server integration
-.\build.ps1 -ConfigureMemoryServer
-
-# Or manually clone and configure
-git clone https://github.com/david-t-martel/agent-memory-server.git %USERPROFILE%\agent-memory-server
-cd %USERPROFILE%\agent-memory-server
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-```
-
-### 3. Start Services
-
-```powershell
-# Start Redis
+# Start the service
 net start Redis
-# OR
-.\start.bat
+```
 
-# Start Agent Memory Server
-cd %USERPROFILE%\agent-memory-server
-.venv\Scripts\activate
-agent-memory-server run-all
+### 2. Build agent-sync
+
+```bash
+cd agent-sync
+cargo build --release
+```
+
+### 3. Connect Your Agents
+
+```rust
+use agent_sync::{AgentSync, Config};
+
+let config = Config::builder()
+    .redis_url("redis://localhost:6380")
+    .build()?;
+let client = AgentSync::new(config).await?;
 ```
 
 ## Agent Configuration
 
 ### Connection Settings
 
-Your LLM agents should connect to:
-
-- **Redis Direct**: `redis://localhost:6379`
-- **Agent Memory API**: `http://localhost:8000`
-- **Agent Memory MCP**: `ws://localhost:8001`
+| Endpoint | URL | Purpose |
+|----------|-----|---------|
+| Redis (Agent) | `redis://localhost:6380` | Production agent workloads |
+| Redis (Dev) | `redis://localhost:6379` | Development via WSL |
 
 ### Environment Variables
 
-Set these in your agent's environment:
-
 ```bash
-# Redis connection
-REDIS_URL=redis://localhost:6379
+REDIS_URL=redis://localhost:6380
 REDIS_PASSWORD=your_password_if_set
-
-# Agent Memory Server
-AGENT_MEMORY_API_URL=http://localhost:8000
-AGENT_MEMORY_MCP_URL=ws://localhost:8001
-
-# Optional: Custom ports
-REDIS_PORT=6379
-AGENT_MEMORY_PORT=8000
-AGENT_MEMORY_MCP_PORT=8001
 ```
 
-## Agent Memory Server Features
+## Core Coordination Features
 
-The agent-memory-server provides:
+### Task Queue
 
-### Working Memory
-- Session-scoped message storage
-- Automatic conversation summarization
-- Context window management
-- Real-time memory updates
+Distributed task scheduling with priorities and dependencies:
 
-### Long-Term Memory
-- Persistent memory across sessions
-- Semantic search capabilities
-- Vector store integration
-- Memory deduplication
+```rust
+// Submit a task
+let task_id = client.task_queue().submit("process_data", payload).await?;
 
-### Security & Isolation
-- OAuth2/JWT authentication
-- User and session isolation
-- RBAC permissions
-- Secure API endpoints
+// Claim and process tasks
+let task = client.task_queue().claim("worker-1").await?;
+client.task_queue().complete(task.id, result).await?;
+```
+
+### Shared Context
+
+Type-safe key-value storage for agent state:
+
+```rust
+// Store shared state with TTL
+client.shared_context().set_with_ttl("agent:state", value, Duration::from_secs(300)).await?;
+
+// Retrieve state
+let state: AgentState = client.shared_context().get("agent:state").await?;
+```
+
+### Notification Bus
+
+Pub/sub messaging between agents:
+
+```rust
+// Subscribe to topic patterns
+let mut stream = client.notification_bus().subscribe("tasks.*").await?;
+
+// Publish notifications
+client.notification_bus().publish("tasks.completed", message).await?;
+```
+
+### Agent Registry
+
+Track agent liveness and capabilities:
+
+```rust
+// Register an agent
+client.registry().register(agent_info).await?;
+
+// Heartbeat
+client.registry().heartbeat(agent_id).await?;
+
+// Discover agents
+let agents = client.registry().list_active().await?;
+```
 
 ## Redis Configuration for Agents
 
-The `redis-agent.conf` file is optimized for agent workloads:
+The `redis-agent.conf` is pre-tuned for agent workloads:
 
-### Memory Management
 ```conf
+# Memory: 2GB with LRU eviction
 maxmemory 2gb
 maxmemory-policy allkeys-lru
-lazyfree-lazy-eviction yes
-```
 
-### Persistence
-```conf
-# Balanced approach for agent data
-save 900 1
+# Non-blocking operations
+lazyfree-lazy-eviction yes
+
+# Memory optimization
+activedefrag yes
+
+# Large agent payloads
+proto-max-bulk-len 512mb
+
+# Keyspace event notifications
+notify-keyspace-events "Ex"
+
+# Durability
 appendonly yes
 appendfsync everysec
 ```
 
-### Performance
-```conf
-# Optimized for agent access patterns
-hash-max-listpack-entries 512
-activedefrag yes
-notify-keyspace-events "Ex"
-```
+## Performance Targets
 
-## Integration Examples
-
-### Python Agent Example
-
-```python
-import redis
-import requests
-from agent_memory_client import MemoryClient
-
-# Redis connection
-redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
-
-# Agent Memory Server connection
-memory_client = MemoryClient(api_url='http://localhost:8000')
-
-# Store working memory
-memory_client.store_working_memory(
-    session_id="agent_session_1",
-    messages=[{"role": "user", "content": "Hello"}]
-)
-
-# Store long-term memory
-memory_client.store_long_term_memory(
-    user_id="user123",
-    content="Important fact about the user",
-    metadata={"topic": "preferences"}
-)
-
-# Search memories
-results = memory_client.search_memories(
-    query="user preferences",
-    user_id="user123"
-)
-```
-
-### MCP Integration
-
-For agents supporting Model Context Protocol:
-
-```json
-{
-  "mcpServers": {
-    "agent-memory": {
-      "command": "agent-memory-server",
-      "args": ["run-mcp"],
-      "env": {
-        "REDIS_URL": "redis://localhost:6379",
-        "MCP_HOST": "localhost",
-        "MCP_PORT": "8001"
-      }
-    }
-  }
-}
-```
-
-### REST API Usage
-
-```bash
-# Store working memory
-curl -X POST http://localhost:8000/api/v1/working-memory \
-  -H "Content-Type: application/json" \
-  -d '{
-    "session_id": "session123",
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'
-
-# Search long-term memory
-curl -X GET "http://localhost:8000/api/v1/long-term-memory/search?q=user%20preferences&user_id=user123"
-```
+| Operation | Target Latency | Target Throughput |
+|-----------|---------------|-------------------|
+| Task submission | < 1ms | 100K tasks/sec |
+| Context retrieval | < 500us | 1M ops/sec |
+| Notification broadcast | < 100us | 50K msgs/sec |
+| Agent registration | < 5ms | 10K agents |
 
 ## Production Deployment
 
-### Security Configuration
+### Security
 
-1. **Set Redis Password**:
-   ```conf
-   # In redis-agent.conf
-   requirepass your_very_secure_password
-   ```
+```conf
+# In redis-agent.conf
+requirepass your_very_secure_password
+```
 
-2. **Configure Firewall**:
-   ```powershell
-   # Allow only local connections
-   New-NetFirewallRule -DisplayName "Redis Local" -Direction Inbound -Protocol TCP -LocalPort 6379 -RemoteAddress 127.0.0.1
-   ```
-
-3. **Agent Memory Server Security**:
-   ```bash
-   # Set OAuth2 configuration
-   export OAUTH2_PROVIDER_URL=https://your-auth-provider.com
-   export JWT_SECRET_KEY=your_jwt_secret
-   ```
-
-### Performance Tuning
-
-1. **Memory Allocation**:
-   ```conf
-   maxmemory 4gb  # Adjust based on available RAM
-   maxmemory-policy allkeys-lru
-   ```
-
-2. **Connection Limits**:
-   ```conf
-   maxclients 5000  # Adjust for agent count
-   ```
-
-3. **Persistence Tuning**:
-   ```conf
-   # For high-write agent workloads
-   save 300 100
-   appendfsync no  # Use with caution
-   ```
+```powershell
+# Firewall
+New-NetFirewallRule -DisplayName "Redis Agent" -Direction Inbound -Protocol TCP -LocalPort 6380 -RemoteAddress 127.0.0.1
+```
 
 ### Monitoring
 
-1. **Redis Monitoring**:
-   ```powershell
-   # Check Redis status
-   redis-cli.exe info
-   redis-cli.exe monitor
-   ```
-
-2. **Agent Memory Server Monitoring**:
-   ```bash
-   # Check API health
-   curl http://localhost:8000/health
-   
-   # View metrics
-   curl http://localhost:8000/metrics
-   ```
-
-3. **Windows Service Monitoring**:
-   ```powershell
-   # Check service status
-   Get-Service Redis
-   
-   # View event logs
-   Get-EventLog -LogName Application -Source "Redis Service"
-   ```
+```powershell
+redis-cli.exe -p 6380 info memory
+redis-cli.exe -p 6380 info clients
+redis-cli.exe -p 6380 slowlog get 10
+Get-EventLog -LogName Application -Source "Redis*" -Newest 20
+```
 
 ## Troubleshooting
 
-### Common Issues
+### Connection Issues
 
-1. **Redis Connection Failed**:
-   ```powershell
-   # Check service status
-   Get-Service Redis
-   
-   # Test connection
-   redis-cli.exe ping
-   
-   # Check firewall
-   Test-NetConnection -ComputerName localhost -Port 6379
-   ```
+```powershell
+# Check service
+Get-Service Redis
 
-2. **Agent Memory Server Not Starting**:
-   ```bash
-   # Check Python environment
-   python --version
-   
-   # Verify installation
-   pip list | grep agent-memory
-   
-   # Check configuration
-   cat .env
-   ```
-
-3. **High Memory Usage**:
-   ```conf
-   # Monitor memory usage
-   redis-cli.exe info memory
-   
-   # Adjust limits
-   config set maxmemory 1gb
-   ```
+# Test connectivity
+redis-cli.exe -p 6380 ping
+Test-NetConnection localhost -Port 6380
+```
 
 ### Performance Issues
 
-1. **Slow Responses**:
-   ```bash
-   # Check slow queries
-   redis-cli.exe slowlog get 10
-   
-   # Monitor connections
-   redis-cli.exe info clients
-   ```
-
-2. **Memory Fragmentation**:
-   ```conf
-   # Enable active defragmentation
-   activedefrag yes
-   active-defrag-threshold-lower 10
-   ```
-
-## Development Tips
-
-### Testing Agent Integration
-
-```python
-# Test script for agent integration
-import redis
-import time
-
-def test_agent_memory():
-    r = redis.Redis(host='localhost', port=6379, decode_responses=True)
-    
-    # Test basic operations
-    r.set('agent:test', 'Hello Agent')
-    value = r.get('agent:test')
-    print(f"Test value: {value}")
-    
-    # Test agent memory patterns
-    session_id = "test_session"
-    r.lpush(f'session:{session_id}:messages', '{"role": "user", "content": "test"}')
-    messages = r.lrange(f'session:{session_id}:messages', 0, -1)
-    print(f"Session messages: {messages}")
-
-if __name__ == "__main__":
-    test_agent_memory()
-```
-
-### Custom Agent Integration
-
-```python
-class AgentRedisManager:
-    def __init__(self, redis_url='redis://localhost:6379'):
-        self.redis = redis.from_url(redis_url)
-        
-    def store_conversation(self, session_id, messages):
-        key = f'conversation:{session_id}'
-        self.redis.json().set(key, '$', {
-            'messages': messages,
-            'timestamp': time.time()
-        })
-        
-    def get_conversation(self, session_id):
-        key = f'conversation:{session_id}'
-        return self.redis.json().get(key, '$')
-        
-    def search_memories(self, query, user_id):
-        # Implement semantic search using Redis vector capabilities
-        # or integrate with agent-memory-server
-        pass
+```powershell
+redis-cli.exe -p 6380 slowlog get 10
+redis-cli.exe -p 6380 info memory
 ```
 
 ## Next Steps
 
-1. **Scale Horizontally**: Consider Redis Cluster for multiple agents
-2. **Add Monitoring**: Implement Prometheus/Grafana monitoring
-3. **Backup Strategy**: Setup automated Redis backups
-4. **Load Testing**: Test with realistic agent workloads
-5. **Security Audit**: Regular security reviews for production use
+1. **Scale**: Consider Redis Cluster for multiple agents
+2. **Monitor**: Prometheus/Grafana integration
+3. **Backup**: Automated Redis backup strategy
+4. **Load Test**: Benchmark with realistic agent workloads
 
-For more details, see:
-- [Redis Documentation](https://redis.io/documentation)
-- [Agent Memory Server Docs](https://github.com/david-t-martel/agent-memory-server/docs)
-- [Windows Service Management](SETUP_GUIDE.md)
+For full API documentation, see [agent-sync/README.md](agent-sync/README.md).
