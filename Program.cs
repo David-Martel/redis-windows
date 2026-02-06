@@ -58,13 +58,11 @@ namespace RedisService
                     // If event log fails, write to console
                     Console.WriteLine($"Failed to start Redis service: {ex.Message}");
                 }
-                
+
                 Environment.Exit(1);
             }
         }
     }
-
-
 
     public class RedisService : BackgroundService
     {
@@ -72,36 +70,37 @@ namespace RedisService
         private readonly ILogger<RedisService> logger;
         private Process? redisProcess;
 
+        private string redisServerPath = string.Empty;
+        private string configPathForRedis = string.Empty;
+
         public RedisService(string configFilePath, ILogger<RedisService> logger)
         {
             this.configFilePath = configFilePath;
             this.logger = logger;
         }
 
-        public override Task StartAsync(CancellationToken stoppingToken)
+        public override Task StartAsync(CancellationToken cancellationToken)
         {
             try
             {
-                var basePath = Path.Combine(AppContext.BaseDirectory);
-                string resolvedConfigPath = configFilePath;
+                var basePath = AppContext.BaseDirectory;
+                string conf = configFilePath;
 
-                if (!Path.IsPathRooted(configFilePath))
-                {
-                    resolvedConfigPath = Path.Combine(basePath, configFilePath);
-                }
+                if (!Path.IsPathRooted(conf))
+                    conf = Path.Combine(basePath, conf);
 
-                resolvedConfigPath = Path.GetFullPath(resolvedConfigPath);
+                conf = Path.GetFullPath(conf);
 
-                logger.LogInformation("Starting Redis server with config: {ConfigPath}", resolvedConfigPath);
+                logger.LogInformation("Starting Redis server with config: {ConfigPath}", conf);
 
                 // Verify config file exists
-                if (!File.Exists(resolvedConfigPath))
+                if (!File.Exists(conf))
                 {
-                    logger.LogWarning("Config file not found: {ConfigPath}, Redis will use defaults", resolvedConfigPath);
+                    logger.LogWarning("Config file not found: {ConfigPath}, Redis will use defaults", conf);
                 }
 
                 // Check if Redis server executable exists
-                string redisServerPath = Path.Combine(basePath, "redis-server.exe");
+                redisServerPath = Path.Combine(basePath, "redis-server.exe");
                 if (!File.Exists(redisServerPath))
                 {
                     logger.LogError("Redis server executable not found: {RedisServerPath}", redisServerPath);
@@ -109,15 +108,17 @@ namespace RedisService
                 }
 
                 // For MSYS2/Cygwin compatibility, convert Windows path to Unix-style path
-                var diskSymbol = resolvedConfigPath[..resolvedConfigPath.IndexOf(":")];
-                var fileConf = resolvedConfigPath.Replace(diskSymbol + ":", "/cygdrive/" + diskSymbol).Replace("\\", "/");
+                var diskSymbol = conf[..conf.IndexOf(":")];
+                configPathForRedis = conf
+                    .Replace(diskSymbol + ":", "/cygdrive/" + diskSymbol)
+                    .Replace("\\", "/");
 
-                string fileName = redisServerPath.Replace("\\", "/");
-                string arguments = $"\"{fileConf}\"";
+                redisServerPath = redisServerPath.Replace("\\", "/");
+                string arguments = $"\"{configPathForRedis}\"";
 
-                logger.LogInformation("Executing: {FileName} {Arguments}", fileName, arguments);
+                logger.LogInformation("Executing: {FileName} {Arguments}", redisServerPath, arguments);
 
-                ProcessStartInfo processStartInfo = new(fileName, arguments)
+                var processStartInfo = new ProcessStartInfo(redisServerPath, arguments)
                 {
                     WorkingDirectory = basePath,
                     UseShellExecute = false,
@@ -128,7 +129,7 @@ namespace RedisService
 
                 redisProcess = new Process();
                 redisProcess.StartInfo = processStartInfo;
-                
+
                 // Log Redis output
                 redisProcess.OutputDataReceived += (sender, e) => {
                     if (!string.IsNullOrEmpty(e.Data))
@@ -136,7 +137,7 @@ namespace RedisService
                         logger.LogInformation("Redis: {Output}", e.Data);
                     }
                 };
-                
+
                 redisProcess.ErrorDataReceived += (sender, e) => {
                     if (!string.IsNullOrEmpty(e.Data))
                     {
@@ -154,7 +155,7 @@ namespace RedisService
                 redisProcess.BeginErrorReadLine();
 
                 logger.LogInformation("Redis server started successfully with PID: {ProcessId}", redisProcess.Id);
-                
+
                 return Task.CompletedTask;
             }
             catch (Exception ex)
@@ -189,39 +190,69 @@ namespace RedisService
             }
         }
 
-        public override Task StopAsync(CancellationToken stoppingToken)
+        public override async Task StopAsync(CancellationToken cancellationToken)
         {
+            if (redisProcess == null || redisProcess.HasExited)
+                return;
+
             try
             {
-                if (redisProcess != null && !redisProcess.HasExited)
+                logger.LogInformation("Stopping Redis server...");
+
+                // Try graceful shutdown via redis-cli SHUTDOWN first
+                await TryGracefulShutdownAsync();
+
+                bool exited = await WaitForExitAsync(redisProcess, 5000);
+
+                if (!exited)
                 {
-                    logger.LogInformation("Stopping Redis server...");
-                    
-                    // Try graceful shutdown first
-                    try
-                    {
-                        redisProcess.Kill();
-                        redisProcess.WaitForExit(5000); // Wait up to 5 seconds
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "Error during graceful shutdown, forcing termination");
-                        redisProcess.Kill();
-                    }
-                    
-                    redisProcess.Dispose();
-                    redisProcess = null;
-                    
-                    logger.LogInformation("Redis server stopped");
+                    logger.LogWarning("Graceful shutdown timed out, forcing termination");
+                    redisProcess.Kill(true);
                 }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error stopping Redis server");
+                logger.LogWarning(ex, "Error during graceful shutdown, forcing termination");
+                if (!redisProcess.HasExited)
+                    redisProcess.Kill(true);
             }
 
-            return Task.CompletedTask;
+            redisProcess.Dispose();
+            redisProcess = null;
+            logger.LogInformation("Redis server stopped");
+        }
+
+        private async Task TryGracefulShutdownAsync()
+        {
+            string redisCliPath = Path.Combine(AppContext.BaseDirectory, "redis-cli.exe");
+
+            if (!File.Exists(redisCliPath))
+            {
+                logger.LogWarning("redis-cli.exe not found, skipping graceful shutdown");
+                return;
+            }
+
+            var psi = new ProcessStartInfo(redisCliPath, "SHUTDOWN")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            try
+            {
+                using var cli = Process.Start(psi);
+                if (cli != null)
+                    await cli.WaitForExitAsync();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "redis-cli SHUTDOWN command failed");
+            }
+        }
+
+        private static Task<bool> WaitForExitAsync(Process process, int timeoutMs)
+        {
+            return Task.Run(() => process.WaitForExit(timeoutMs));
         }
     }
-
 }

@@ -114,7 +114,7 @@ jobs:
           path: |
             C:/msys64/var/cache/pacman/pkg
             C:/msys64/usr/bin
-          key: msys2-${{ runner.os }}-${{ hashFiles('**/*.yml') }}
+          key: msys2-${{ runner.os }}-${{ hashFiles('.github/workflows/build-redis.yml') }}
           restore-keys: msys2-${{ runner.os }}-
 
       - uses: msys2/setup-msys2@v2
@@ -133,6 +133,7 @@ jobs:
           sed -i 's/\"\;/\"/' asciilogo.h
           echo '" Redis for Windows Project Home \n"' >> asciilogo.h
           echo '" https://github.com/redis-windows/redis-windows  \n\n";' >> asciilogo.h
+          sed -i 's/all: \(.*\) module_tests$/all: \1/' Makefile
           cd ..
 
           # Build Redis
@@ -215,7 +216,7 @@ jobs:
           path: |
             C:/cygwin64
             C:/cygwin64/var/cache
-          key: cygwin-${{ runner.os }}-${{ hashFiles('**/*.yml') }}
+          key: cygwin-${{ runner.os }}-${{ hashFiles('.github/workflows/build-redis.yml') }}
           restore-keys: cygwin-${{ runner.os }}-
 
       - uses: cygwin/cygwin-install-action@master
@@ -233,12 +234,13 @@ jobs:
           sed -i 's/\"\;/\"/' asciilogo.h ;
           echo '" Redis for Windows Project Home \n"' >> asciilogo.h ;
           echo '" https://github.com/redis-windows/redis-windows  \n\n";' >> asciilogo.h ;
+          sed -i 's/all: \(.*\) module_tests$/all: \1/' Makefile ;
           cd .. ;
           make BUILD_TLS=yes CFLAGS="-Wno-char-subscripts -O0" -j$(nproc) ;
           cd $workspace ;
           mkdir -p ${{ env.REDIS_DIST }}-cygwin ;
           find redis-${{ env.RELEASE_VERSION }} -mindepth 1 -maxdepth 2 -type f -regex '.*\(\.exe\|\.conf\)' -exec cp -f "{}" "${{ env.REDIS_DIST }}-cygwin" \; ;
-          cp README.md README.zh_CN.md start.bat /bin/cygcrypto-3.dll /bin/cygwin1.dll /bin/cygssl-3.dll /bin/cygz.dll /bin/cyggcc_s-seh-1.dll /bin/cygstdc++-6.dll ${{ env.REDIS_DIST }}-cygwin ;
+          cp README.md README.zh_CN.md start.bat /bin/cygcrypto-3.dll /bin/cygwin1.dll /bin/cygssl-3.dll /bin/cygz.dll /bin/cyggcc_s-seh-1.dll /bin/cygstdc++-6.dll /bin/cygiconv-2.dll /bin/cygintl-8.dll ${{ env.REDIS_DIST }}-cygwin ;
           sed -i 's/pidfile \/var\/run/pidfile ./' ${{ env.REDIS_DIST }}-cygwin/redis.conf ;
           zip -q -r ${{ env.REDIS_DIST }}-cygwin.zip ${{ env.REDIS_DIST }}-cygwin ;
           cp -r ${{ env.REDIS_DIST }}-cygwin ${{ env.REDIS_DIST }}-cygwin-with-Service ;
@@ -316,6 +318,8 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
+          overwrite_files: false
+          fail_on_unmatched_files: true
           token: ${{ secrets.GITHUB_TOKEN }}
           name: Redis ${{ env.RELEASE_VERSION }} for Windows
           tag_name: ${{ env.RELEASE_VERSION }}
