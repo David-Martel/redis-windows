@@ -1,16 +1,20 @@
-# Build artifacts
+# Build artifacts - .NET
 bin/
 */bin/
 obj/
 */obj/
 publish/
 */publish/
+
+# Build artifacts - Rust
+agent-sync/target/
+
+# Compiled binaries (downloaded/built separately)
 *.exe
 *.dll
 *.pdb
 
 # Configuration files with secrets
-redis.conf
 .env
 .env.local
 .env.production
@@ -20,9 +24,6 @@ redis.conf
 *.swp
 *.swo
 *~
-
-# Keep .vscode/ for project configuration
-# .vscode/ - intentionally not ignored
 
 # Redis data and logs
 *.rdb
@@ -51,3 +52,11 @@ logs/
 # Runtime files
 *.pid
 *.lock
+
+# Deprecated artifacts
+*.old
+*.broken
+agent-sync/clippy_output.txt
+
+# Taskmaster
+.taskmaster/

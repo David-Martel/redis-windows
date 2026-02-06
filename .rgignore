@@ -1,0 +1,52 @@
+# .rgignore - Override .gitignore for LLM agent code search tools
+# ripgrep (and tools built on it like Claude Code) use this file to decide
+# what to index. We INCLUDE compiled outputs and config so agents can
+# inspect build artifacts, while still excluding truly noisy directories.
+
+# === INCLUDE (override gitignore) ===
+# Let agents see compiled service output and Redis configs
+!publish/
+!publish/**
+!redis.conf
+!redis-agent.conf
+
+# Let agents see Rust build metadata (not the full target tree)
+!agent-sync/Cargo.lock
+
+# === EXCLUDE (noise for search) ===
+# Rust incremental build artifacts (massive, useless for search)
+agent-sync/target/debug/deps/
+agent-sync/target/debug/build/
+agent-sync/target/debug/incremental/
+agent-sync/target/debug/.fingerprint/
+agent-sync/target/release/
+agent-sync/target/.rustc_info.json
+agent-sync/target/CACHEDIR.TAG
+
+# .NET intermediate build artifacts
+obj/
+bin/Debug/
+bin/Release/
+
+# Binary files (not useful for text search)
+*.exe
+*.dll
+*.pdb
+*.rlib
+*.rmeta
+*.d
+*.o
+*.a
+*.lib
+*.exp
+
+# IDE / OS noise
+.vs/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+
+# Data files
+*.rdb
+*.aof
