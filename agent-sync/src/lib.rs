@@ -6,6 +6,7 @@
 
 #![deny(missing_docs, unsafe_code)]
 #![warn(clippy::all, clippy::pedantic, clippy::nursery)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, clippy::module_name_repetitions)]
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 
 // Re-export key types from dependencies for convenience
@@ -36,6 +37,12 @@ pub use types::{AgentId, AgentInfo, AgentStatus, MessageId, SessionId, SyncResul
 // Re-export common result type
 pub use error::{Error, Result};
 
+// Re-export connection pool
+pub use connection::{ConnectionPool, PoolStatus};
+
+// Re-export agent registry types
+pub use coordinator::{AgentCapabilities, AgentRegistry, RegisteredAgent};
+
 // Feature-gated exports
 #[cfg(feature = "serde-support")]
 pub mod serde_support;
@@ -55,6 +62,15 @@ pub const NAME: &str = env!("CARGO_PKG_NAME");
 pub const DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
 
 /// Initialize the agent-sync library with default configuration
+/// Initialize the library
+///
+/// # Errors
+///
+/// Returns error if initialization fails.
+///
+/// # Panics
+///
+/// Panics if tracing initialization fails.
 pub async fn init() -> Result<()> {
     // Initialize tracing
     #[cfg(not(test))]
@@ -67,7 +83,8 @@ pub async fn init() -> Result<()> {
                     .unwrap_or_else(|_| "agent_sync=info".into()),
             )
             .with(tracing_subscriber::fmt::layer())
-            .init();
+            .try_init()
+            .expect("Failed to initialize tracing subscriber");
     }
 
     // Initialize platform-specific components
@@ -93,3 +110,7 @@ mod tests {
         assert!(init().await.is_ok());
     }
 }
+
+
+
+

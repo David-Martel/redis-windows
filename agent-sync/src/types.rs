@@ -95,8 +95,10 @@ impl Timestamp {
 /// Agent status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[derive(Default)]
 pub enum AgentStatus {
     /// Agent is initializing
+    #[default]
     Initializing,
     /// Agent is active
     Active,
@@ -112,11 +114,6 @@ pub enum AgentStatus {
     Shutdown,
 }
 
-impl Default for AgentStatus {
-    fn default() -> Self {
-        Self::Initializing
-    }
-}
 
 /// Agent information
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,3 +164,5 @@ pub struct SyncResult {
     /// Operation duration in milliseconds
     pub duration_ms: u64,
 }
+
+

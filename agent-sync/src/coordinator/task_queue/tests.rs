@@ -1,10 +1,8 @@
 //! Unit tests for task queue module
 
 use super::*;
-use crate::testing::{MockRedisConnection, TestRedisServer};
 use rstest::*;
 use std::time::Duration;
-use tokio::time::sleep;
 
 /// Test fixture for creating test tasks
 #[fixture]
@@ -142,7 +140,7 @@ fn test_task_priority_ordering() {
 #[rstest]
 fn test_task_status_variants() {
     let agent_id = AgentId::new();
-    let task_id = Uuid::new_v4();
+    let _task_id = Uuid::new_v4();
 
     let pending = TaskStatus::Pending;
     let in_progress = TaskStatus::InProgress { agent_id };
@@ -345,3 +343,5 @@ mod proptest_tests {
         }
     }
 }
+
+

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Redis mocking utilities for testing
 //!
 //! This module provides comprehensive Redis mocking capabilities
@@ -7,10 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use mockall::mock;
-use redis::{AsyncCommands, RedisResult, Value};
-use tokio::sync::{broadcast, mpsc, RwLock};
-use uuid::Uuid;
+use tokio::sync::{broadcast, RwLock};
 
 use crate::{Error, Result};
 
@@ -28,12 +26,12 @@ impl MockRedisClient {
     }
 
     /// Create a mock client with shared store
-    pub fn with_store(store: Arc<MockRedisStore>) -> Self {
+    pub const fn with_store(store: Arc<MockRedisStore>) -> Self {
         Self { store }
     }
 
     /// Get reference to the underlying store
-    pub fn store(&self) -> &Arc<MockRedisStore> {
+    pub const fn store(&self) -> &Arc<MockRedisStore> {
         &self.store
     }
 
@@ -83,7 +81,7 @@ impl Ord for OrderedFloat {
 
 impl From<f64> for OrderedFloat {
     fn from(value: f64) -> Self {
-        OrderedFloat(value)
+        Self(value)
     }
 }
 
@@ -174,42 +172,42 @@ impl MockRedisStore {
 
     /// Configure the mock store
     pub fn configure(&self, config: MockRedisConfig) {
-        *self.config.lock().unwrap() = config;
+        *self.config.lock().expect("Failed to lock config") = config;
     }
 
     /// Enable network delay simulation
     pub fn enable_network_delay(&self, delay_ms: u64) {
-        let mut config = self.config.lock().unwrap();
+        let mut config = self.config.lock().expect("Failed to lock config");
         config.simulate_network_delay = true;
         config.network_delay_ms = delay_ms;
     }
 
     /// Enable failure simulation
     pub fn enable_failure_simulation(&self, failure_rate: f64) {
-        let mut config = self.config.lock().unwrap();
+        let mut config = self.config.lock().expect("Failed to lock config");
         config.simulate_failures = true;
         config.failure_rate = failure_rate;
     }
 
     /// Record command execution
     fn record_command(&self, command: &str) {
-        let mut history = self.command_history.lock().unwrap();
+        let mut history = self.command_history.lock().expect("Failed to lock history");
         history.push(command.to_string());
     }
 
     /// Get command history
     pub fn get_command_history(&self) -> Vec<String> {
-        self.command_history.lock().unwrap().clone()
+        self.command_history.lock().expect("Failed to lock history").clone()
     }
 
     /// Clear command history
     pub fn clear_command_history(&self) {
-        self.command_history.lock().unwrap().clear();
+        self.command_history.lock().expect("Failed to lock history").clear();
     }
 
     /// Simulate network delay if configured
     async fn simulate_delay(&self) {
-        let config = self.config.lock().unwrap().clone();
+        let config = self.config.lock().expect("Failed to lock config").clone();
         if config.simulate_network_delay {
             tokio::time::sleep(Duration::from_millis(config.network_delay_ms)).await;
         }
@@ -217,7 +215,7 @@ impl MockRedisStore {
 
     /// Check if operation should fail
     fn should_fail(&self) -> bool {
-        let config = self.config.lock().unwrap();
+        let config = self.config.lock().expect("Failed to lock config");
         if config.simulate_failures {
             rand::random::<f64>() < config.failure_rate
         } else {
@@ -275,7 +273,7 @@ impl MockRedisStore {
 
     /// GET command implementation
     pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        self.record_command(&format!("GET {}", key));
+        self.record_command(&format!("GET {key}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -297,7 +295,7 @@ impl MockRedisStore {
 
     /// DEL command implementation
     pub async fn del(&self, key: &str) -> Result<u32> {
-        self.record_command(&format!("DEL {}", key));
+        self.record_command(&format!("DEL {key}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -314,7 +312,7 @@ impl MockRedisStore {
 
     /// EXISTS command implementation
     pub async fn exists(&self, key: &str) -> Result<bool> {
-        self.record_command(&format!("EXISTS {}", key));
+        self.record_command(&format!("EXISTS {key}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -336,7 +334,7 @@ impl MockRedisStore {
 
     /// KEYS command implementation
     pub async fn keys(&self, pattern: &str) -> Result<Vec<String>> {
-        self.record_command(&format!("KEYS {}", pattern));
+        self.record_command(&format!("KEYS {pattern}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -346,7 +344,7 @@ impl MockRedisStore {
         self.cleanup_expired().await;
 
         let data = self.data.read().await;
-        let regex_pattern = pattern.replace("*", ".*");
+        let regex_pattern = pattern.replace('*', ".*");
         let regex = regex::Regex::new(&regex_pattern).unwrap();
 
         let keys: Vec<String> = data
@@ -360,7 +358,7 @@ impl MockRedisStore {
 
     /// EXPIRE command implementation
     pub async fn expire(&self, key: &str, ttl_secs: u64) -> Result<bool> {
-        self.record_command(&format!("EXPIRE {} {}", key, ttl_secs));
+        self.record_command(&format!("EXPIRE {key} {ttl_secs}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -369,16 +367,16 @@ impl MockRedisStore {
 
         let mut data = self.data.write().await;
         if let Some(value) = data.get_mut(key) {
-            if !value.is_expired() {
+            if value.is_expired() {
+                data.remove(key);
+                Ok(false)
+            } else {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
                 value.expires_at = Some(now + ttl_secs);
                 Ok(true)
-            } else {
-                data.remove(key);
-                Ok(false)
             }
         } else {
             Ok(false)
@@ -387,7 +385,7 @@ impl MockRedisStore {
 
     /// TTL command implementation
     pub async fn ttl(&self, key: &str) -> Result<i32> {
-        self.record_command(&format!("TTL {}", key));
+        self.record_command(&format!("TTL {key}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -415,7 +413,7 @@ impl MockRedisStore {
 
     /// INCR command implementation
     pub async fn incr(&self, key: &str, amount: i64) -> Result<i64> {
-        self.record_command(&format!("INCR {} {}", key, amount));
+        self.record_command(&format!("INCR {key} {amount}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -429,10 +427,10 @@ impl MockRedisStore {
                 0
             } else {
                 let value_str = String::from_utf8(value.data.clone())
-                    .map_err(|_| Error::Test("Invalid UTF-8 in stored value".to_string()))?;
+                    .map_err(|_| Error::test("Invalid UTF-8 in stored value".to_string()))?;
                 value_str
                     .parse::<i64>()
-                    .map_err(|_| Error::Test("Stored value is not a valid integer".to_string()))?
+                    .map_err(|_| Error::test("Stored value is not a valid integer".to_string()))?
             }
         } else {
             0
@@ -472,7 +470,7 @@ impl MockRedisStore {
 
     /// HGET command implementation
     pub async fn hget(&self, key: &str, field: &str) -> Result<Option<Vec<u8>>> {
-        self.record_command(&format!("HGET {} {}", key, field));
+        self.record_command(&format!("HGET {key} {field}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -489,7 +487,7 @@ impl MockRedisStore {
 
     /// HDEL command implementation
     pub async fn hdel(&self, key: &str, field: &str) -> Result<u32> {
-        self.record_command(&format!("HDEL {} {}", key, field));
+        self.record_command(&format!("HDEL {key} {field}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -513,7 +511,7 @@ impl MockRedisStore {
 
     /// HLEN command implementation
     pub async fn hlen(&self, key: &str) -> Result<u64> {
-        self.record_command(&format!("HLEN {}", key));
+        self.record_command(&format!("HLEN {key}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -550,12 +548,12 @@ impl MockRedisStore {
             .or_insert_with(std::collections::BTreeMap::new);
         let old_value = zset.insert(OrderedFloat(score), value);
 
-        Ok(if old_value.is_some() { 0 } else { 1 })
+        Ok(u32::from(old_value.is_none()))
     }
 
     /// ZCARD command implementation
     pub async fn zcard(&self, key: &str) -> Result<u64> {
-        self.record_command(&format!("ZCARD {}", key));
+        self.record_command(&format!("ZCARD {key}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -572,7 +570,7 @@ impl MockRedisStore {
 
     /// ZPOPMAX command implementation
     pub async fn zpopmax(&self, key: &str, count: usize) -> Result<Vec<(Vec<u8>, f64)>> {
-        self.record_command(&format!("ZPOPMAX {} {}", key, count));
+        self.record_command(&format!("ZPOPMAX {key} {count}"));
         self.simulate_delay().await;
 
         if self.should_fail() {
@@ -627,7 +625,7 @@ impl MockRedisStore {
 
     /// Subscribe to a channel
     pub async fn subscribe(&self, channel: &str) -> broadcast::Receiver<Vec<u8>> {
-        self.record_command(&format!("SUBSCRIBE {}", channel));
+        self.record_command(&format!("SUBSCRIBE {channel}"));
 
         let mut pubsub = self.pubsub.write().await;
         let sender = pubsub
@@ -680,6 +678,7 @@ impl MockRedisStore {
             set_keys: sets.len(),
             hash_keys: hashes.len(),
             zset_keys: zsets.len(),
+            commands_executed: self.command_history.lock().expect("Failed to lock command history").len() as u64,
         }
     }
 }
@@ -701,6 +700,7 @@ pub struct MockRedisStats {
     pub set_keys: usize,
     pub hash_keys: usize,
     pub zset_keys: usize,
+    pub commands_executed: u64,
 }
 
 /// Builder for creating configured mock Redis clients
@@ -712,7 +712,7 @@ pub struct MockRedisClientBuilder {
 
 impl MockRedisClientBuilder {
     /// Create a new builder
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             network_delay_ms: None,
             failure_rate: None,
@@ -721,19 +721,19 @@ impl MockRedisClientBuilder {
     }
 
     /// Enable network delay simulation
-    pub fn with_network_delay(mut self, delay_ms: u64) -> Self {
+    pub const fn with_network_delay(mut self, delay_ms: u64) -> Self {
         self.network_delay_ms = Some(delay_ms);
         self
     }
 
     /// Enable failure simulation
-    pub fn with_failure_rate(mut self, failure_rate: f64) -> Self {
+    pub const fn with_failure_rate(mut self, failure_rate: f64) -> Self {
         self.failure_rate = Some(failure_rate);
         self
     }
 
     /// Set maximum memory limit
-    pub fn with_max_memory(mut self, max_memory: usize) -> Self {
+    pub const fn with_max_memory(mut self, max_memory: usize) -> Self {
         self.max_memory = Some(max_memory);
         self
     }
@@ -856,8 +856,8 @@ mod tests {
         assert_eq!(message, b"test_message");
     }
 
-    #[test]
-    fn test_mock_redis_builder() {
+    #[tokio::test]
+    async fn test_mock_redis_builder() {
         let client = MockRedisClientBuilder::new()
             .with_network_delay(10)
             .with_failure_rate(0.1)
@@ -872,9 +872,9 @@ mod tests {
     async fn test_mock_redis_command_history() {
         let store = MockRedisStore::new();
 
-        store.set("key1", b"value1".to_vec()).await.unwrap();
-        store.get("key1").await.unwrap();
-        store.del("key1").await.unwrap();
+        store.set("key1", b"value1".to_vec()).await.expect("Failed to set key");
+        store.get("key1").await.expect("Failed to get key");
+        store.del("key1").await.expect("Failed to del key");
 
         let history = store.get_command_history();
         assert_eq!(history.len(), 3);
@@ -888,12 +888,12 @@ mod tests {
         let store = MockRedisStore::new();
 
         // Add some data
-        store.set("key1", b"value1".to_vec()).await.unwrap();
+        store.set("key1", b"value1".to_vec()).await.expect("Failed to set key");
         store
             .hset("hash1", "field1", b"value1".to_vec())
             .await
-            .unwrap();
-        store.zadd("zset1", b"member1".to_vec(), 1.0).await.unwrap();
+            .expect("Failed to hset");
+        store.zadd("zset1", b"member1".to_vec(), 1.0).await.expect("Failed to zadd");
 
         let stats = store.stats().await;
         assert_eq!(stats.total_keys, 1); // Only string keys count here
@@ -901,3 +901,6 @@ mod tests {
         assert_eq!(stats.zset_keys, 1);
     }
 }
+
+
+

@@ -1,7 +1,6 @@
 //! Unit tests for notification bus module
 
 use super::*;
-use crate::testing::{MockRedisConnection, TestRedisServer};
 use rstest::*;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -218,6 +217,7 @@ fn test_notification_expiry(test_agent_id: AgentId) {
 
 #[rstest]
 fn test_notification_channel_names(test_agent_id: AgentId) {
+    let ns = crate::coordinator::task_queue::DEFAULT_NAMESPACE;
     let notifications = vec![
         (
             Notification::new(
@@ -228,7 +228,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            "agent_sync:notifications:task",
+            format!("{}:notifications:task", ns),
         ),
         (
             Notification::new(
@@ -240,7 +240,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            "agent_sync:notifications:context",
+            format!("{}:notifications:context", ns),
         ),
         (
             Notification::new(
@@ -251,7 +251,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            "agent_sync:notifications:agent",
+            format!("{}:notifications:agent", ns),
         ),
         (
             Notification::new(
@@ -262,7 +262,7 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            "agent_sync:notifications:system",
+            format!("{}:notifications:system", ns),
         ),
         (
             Notification::new(
@@ -273,12 +273,12 @@ fn test_notification_channel_names(test_agent_id: AgentId) {
                 vec![],
                 test_agent_id,
             ),
-            "agent_sync:notifications:custom:metrics",
+            format!("{}:notifications:custom:metrics", ns),
         ),
     ];
 
     for (notification, expected_channel) in notifications {
-        assert_eq!(notification.channel_name(), expected_channel);
+        assert_eq!(notification.channel_name(ns), expected_channel);
     }
 }
 
@@ -645,7 +645,7 @@ mod proptest_tests {
             notification.ttl_secs = Some(ttl_secs);
             notification.timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("System time is before UNIX EPOCH")
                 .as_secs() - age_secs;
 
             let should_be_expired = age_secs > ttl_secs;
@@ -659,7 +659,12 @@ mod integration_helpers {
     use super::*;
 
     pub async fn create_test_notification_bus() -> Result<NotificationBus> {
-        NotificationBus::new("redis://localhost:6379").await
+        let port = if cfg!(target_os = "windows") {
+            6380
+        } else {
+            6379
+        };
+        NotificationBus::new(&format!("redis://localhost:{}", port)).await
     }
 
     pub fn create_test_notifications(count: usize, sender: AgentId) -> Vec<Notification> {
@@ -701,14 +706,14 @@ mod integration_helpers {
         assert!(subscriber_count > 0);
 
         // Receive notification with timeout
-        let received = timeout(Duration::from_secs(5), receiver.recv())
+        let received_notification = timeout(Duration::from_secs(5), receiver.recv())
             .await
             .map_err(|_| Error::other("Timeout waiting for notification".to_string()))?
             .ok_or_else(|| Error::other("Channel closed".to_string()))?;
 
         // Verify notification
-        assert_eq!(received.id, notification.id);
-        assert_eq!(received.payload, notification.payload);
+        assert_eq!(received_notification.id, notification.id);
+        assert_eq!(received_notification.payload, notification.payload);
 
         // Cleanup
         bus.unsubscribe(subscription_id).await?;
@@ -740,11 +745,11 @@ mod mock_tests {
         mock_bus
             .expect_publish()
             .with(mockall::predicate::always())
-            .returning(|_| Box::pin(async { Ok(1) }));
+            .returning(|_| Ok(1));
 
-        let result = mock_bus.publish(notification).await;
+        let result: Result<u64> = mock_bus.publish(notification).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
+        assert_eq!(result.expect("Failed to get result"), 1);
     }
 
     #[rstest]
@@ -755,8 +760,6 @@ mod mock_tests {
         let filter = NotificationFilter::default();
         let subscription_id = Uuid::new_v4();
 
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-
         mock_bus
             .expect_subscribe()
             .with(
@@ -764,13 +767,15 @@ mod mock_tests {
                 mockall::predicate::always(),
             )
             .returning(move |_, _| {
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                Box::pin(async move { Ok((subscription_id, rx)) })
+                let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                Ok((subscription_id, rx))
             });
 
-        let result = mock_bus.subscribe(agent_id, filter).await;
+        let result: Result<(Uuid, mpsc::UnboundedReceiver<Notification>)> = mock_bus.subscribe(agent_id, filter).await;
         assert!(result.is_ok());
-        let (returned_id, _receiver) = result.unwrap();
+        let (returned_id, _receiver) = result.expect("Failed to get subscription");
         assert_eq!(returned_id, subscription_id);
     }
 }
+
+

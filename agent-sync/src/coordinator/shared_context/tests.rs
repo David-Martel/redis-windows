@@ -1,7 +1,6 @@
 //! Unit tests for shared context module
 
 use super::*;
-use crate::testing::{MockRedisConnection, TestRedisServer};
 use rstest::*;
 use std::time::Duration;
 
@@ -38,25 +37,26 @@ fn test_context_scope_redis_key_generation() {
     let agent_id = AgentId::new();
     let agent_scope = ContextScope::Agent(agent_id);
     let temp_scope = ContextScope::Temporary { ttl_secs: 300 };
+    let ns = crate::coordinator::task_queue::DEFAULT_NAMESPACE;
 
     assert_eq!(
-        global_scope.redis_key("test_key"),
-        "agent_sync:context:global:test_key"
+        global_scope.redis_key("test_key", ns),
+        format!("{}:context:global:test_key", ns)
     );
 
-    let session_key = session_scope.redis_key("test_key");
-    assert!(session_key.starts_with("agent_sync:context:session:"));
+    let session_key = session_scope.redis_key("test_key", ns);
+    assert!(session_key.starts_with(&format!("{}:context:session:", ns)));
     assert!(session_key.contains(&session_id.to_string()));
     assert!(session_key.ends_with(":test_key"));
 
-    let agent_key = agent_scope.redis_key("test_key");
-    assert!(agent_key.starts_with("agent_sync:context:agent:"));
+    let agent_key = agent_scope.redis_key("test_key", ns);
+    assert!(agent_key.starts_with(&format!("{}:context:agent:", ns)));
     assert!(agent_key.contains(&agent_id.to_string()));
     assert!(agent_key.ends_with(":test_key"));
 
     assert_eq!(
-        temp_scope.redis_key("test_key"),
-        "agent_sync:context:temp:test_key"
+        temp_scope.redis_key("test_key", ns),
+        format!("{}:context:temp:test_key", ns)
     );
 }
 
@@ -312,33 +312,33 @@ mod mock_tests {
         // Set expectation
         mock_context
             .expect_set()
-            .with(mockall::predicate::eq(scope.clone()))
-            .with(mockall::predicate::eq(key))
-            .returning(|_, _, _| Box::pin(async { Ok(ContextResult::Success) }));
+            .with(mockall::predicate::eq(scope.clone()), mockall::predicate::eq(key), mockall::predicate::always())
+            .returning(|_, _, _| Ok(ContextResult::Success));
 
+        let data_for_get = data.clone();
         mock_context
             .expect_get()
-            .with(mockall::predicate::eq(scope.clone()))
-            .with(mockall::predicate::eq(key))
+            .with(mockall::predicate::eq(scope.clone()), mockall::predicate::eq(key))
             .returning(move |_, _| {
-                let data_clone = data.clone();
-                Box::pin(async move { Ok(Some(data_clone)) })
+                let data_clone = data_for_get.clone();
+                Ok(Some(data_clone))
             });
 
         // Test set
-        let result = mock_context.set(scope.clone(), key, data.clone()).await;
+        let result: Result<ContextResult> = mock_context.set(scope.clone(), key, data.clone()).await;
         assert!(result.is_ok());
-        match result.unwrap() {
+        match result.expect("Failed to get set result") {
             ContextResult::Success => {}
             _ => panic!("Expected Success"),
         }
 
         // Test get
-        let retrieved = mock_context.get(scope, key).await;
+        let data_for_assert = data.clone();
+        let retrieved: Result<Option<ContextData>> = mock_context.get(scope, key).await;
         assert!(retrieved.is_ok());
-        let retrieved_data = retrieved.unwrap();
+        let retrieved_data = retrieved.expect("Failed to get retrieved data");
         assert!(retrieved_data.is_some());
-        assert_eq!(retrieved_data.unwrap().data, data.data);
+        assert_eq!(retrieved_data.expect("Failed to get context data").data, data_for_assert.data);
     }
 }
 
@@ -372,10 +372,11 @@ mod proptest_tests {
             key in "[a-zA-Z0-9_-]{1,50}"
         ) {
             let scope = ContextScope::Global;
-            let generated_key1 = scope.redis_key(&key);
-            let generated_key2 = scope.redis_key(&key);
+            let ns = crate::coordinator::task_queue::DEFAULT_NAMESPACE;
+            let generated_key1 = scope.redis_key(&key, ns);
+            let generated_key2 = scope.redis_key(&key, ns);
 
-            prop_assert_eq!(generated_key1, generated_key2);
+            prop_assert_eq!(generated_key1.clone(), generated_key2);
             prop_assert!(generated_key1.contains(&key));
         }
 
@@ -400,7 +401,12 @@ mod integration_helpers {
     use super::*;
 
     pub async fn create_test_shared_context() -> Result<SharedContext> {
-        SharedContext::new("redis://localhost:6379").await
+        let port = if cfg!(target_os = "windows") {
+            6380
+        } else {
+            6379
+        };
+        SharedContext::new(&format!("redis://localhost:{}", port)).await
     }
 
     pub fn create_test_scopes(session_id: SessionId, agent_id: AgentId) -> Vec<ContextScope> {
@@ -432,7 +438,7 @@ mod integration_helpers {
         let set_result = context.set(scope.clone(), key, data.clone()).await?;
         match set_result {
             ContextResult::Success => {}
-            _ => return Err(Error::Test("Set operation failed".to_string())),
+            _ => return Err(Error::other("Set operation failed")),
         }
 
         // Test get
@@ -458,7 +464,7 @@ mod integration_helpers {
 #[cfg(feature = "bench")]
 pub mod bench_helpers {
     use super::*;
-    use criterion::{criterion_group, criterion_main, Criterion};
+    use criterion::{criterion_group, Criterion};
 
     pub fn bench_context_data_creation(c: &mut Criterion) {
         let agent_id = AgentId::new();
@@ -492,3 +498,5 @@ pub mod bench_helpers {
         bench_context_data_serialization
     );
 }
+
+

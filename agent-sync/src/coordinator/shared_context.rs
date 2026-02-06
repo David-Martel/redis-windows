@@ -31,19 +31,33 @@ pub enum ContextScope {
 }
 
 impl ContextScope {
-    /// Generate Redis key for this scope
-    pub fn redis_key(&self, key: &str) -> String {
+    /// Generate Redis key for this scope with a given namespace
+    pub fn redis_key(&self, key: &str, namespace: &str) -> String {
         match self {
-            ContextScope::Global => format!("agent_sync:context:global:{}", key),
-            ContextScope::Session(session_id) => {
-                format!("agent_sync:context:session:{}:{}", session_id, key)
+            Self::Global => format!("{namespace}:context:global:{key}"),
+            Self::Session(session_id) => {
+                format!("{namespace}:context:session:{session_id}:{key}")
             }
-            ContextScope::Agent(agent_id) => {
-                format!("agent_sync:context:agent:{}:{}", agent_id, key)
+            Self::Agent(agent_id) => {
+                format!("{namespace}:context:agent:{agent_id}:{key}")
             }
-            ContextScope::Temporary { .. } => {
-                format!("agent_sync:context:temp:{}", key)
+            Self::Temporary { .. } => {
+                format!("{namespace}:context:temp:{key}")
             }
+        }
+    }
+
+    /// Get the prefix for a scope in a given namespace
+    pub fn prefix(&self, namespace: &str) -> String {
+        match self {
+            Self::Global => format!("{namespace}:context:global:"),
+            Self::Session(session_id) => {
+                format!("{namespace}:context:session:{session_id}:")
+            }
+            Self::Agent(agent_id) => {
+                format!("{namespace}:context:agent:{agent_id}:")
+            }
+            Self::Temporary { .. } => format!("{namespace}:context:temp:"),
         }
     }
 }
@@ -74,7 +88,7 @@ impl ContextData {
     pub fn new(data: Vec<u8>, data_type: String, created_by: AgentId) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time is before UNIX EPOCH")
             .as_secs();
 
         Self {
@@ -90,10 +104,11 @@ impl ContextData {
     }
 
     /// Create context data with expiration
+    #[must_use]
     pub fn with_expiration(mut self, expires_in: Duration) -> Self {
         let expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time is before UNIX EPOCH")
             .as_secs()
             + expires_in.as_secs();
         self.expires_at = Some(expires_at);
@@ -101,22 +116,27 @@ impl ContextData {
     }
 
     /// Add metadata
+    #[must_use]
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
         self
     }
 
     /// Check if data is expired
+    /// Check if data is expired
+    ///
+    /// # Panics
+    ///
+    /// Panics if system time is before UNIX EPOCH.
+    #[must_use]
     pub fn is_expired(&self) -> bool {
-        if let Some(expires_at) = self.expires_at {
+        self.expires_at.map_or(false, |expires_at| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("System time is before UNIX EPOCH")
                 .as_secs();
             now > expires_at
-        } else {
-            false
-        }
+        })
     }
 
     /// Update the data payload
@@ -124,7 +144,7 @@ impl ContextData {
         self.data = data;
         self.updated_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time is before UNIX EPOCH")
             .as_secs();
         self.revision += 1;
         self.metadata
@@ -172,27 +192,84 @@ pub struct SharedContext {
     connection: Arc<RwLock<redis::aio::MultiplexedConnection>>,
     #[allow(dead_code)]
     watches: Arc<RwLock<HashMap<Uuid, ContextWatch>>>,
+    namespace: String,
 }
 
 impl SharedContext {
     /// Create a new shared context manager
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails.
     pub async fn new(redis_url: &str) -> Result<Self> {
+        Self::new_with_namespace(redis_url, crate::coordinator::task_queue::DEFAULT_NAMESPACE).await
+    }
+
+    /// Create a new shared context manager
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. with a custom namespace
+    pub async fn new_with_namespace(redis_url: &str, namespace: &str) -> Result<Self> {
         let client = Client::open(redis_url)
-            .map_err(|e| Error::connection(format!("Failed to create Redis client: {}", e)))?;
+            .map_err(|e| Error::connection(format!("Failed to create Redis client: {e}")))?;
 
         let connection = client
             .get_multiplexed_async_connection()
             .await
-            .map_err(|e| Error::connection(format!("Failed to connect to Redis: {}", e)))?;
+            .map_err(|e| Error::connection(format!("Failed to connect to Redis: {e}")))?;
 
         Ok(Self {
             client,
             connection: Arc::new(RwLock::new(connection)),
             watches: Arc::new(RwLock::new(HashMap::new())),
+            namespace: namespace.to_string(),
         })
     }
 
+    /// Create a new shared context manager
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. using an existing multiplexed connection.
+    pub fn new_with_connection(
+        client: Client,
+        connection: redis::aio::MultiplexedConnection,
+    ) -> Self {
+        Self::new_with_namespace_and_connection(
+            client,
+            connection,
+            crate::coordinator::task_queue::DEFAULT_NAMESPACE,
+        )
+    }
+
+    /// Create a new shared context manager
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. using an existing connection and custom namespace.
+    pub fn new_with_namespace_and_connection(
+        client: Client,
+        connection: redis::aio::MultiplexedConnection,
+        namespace: &str,
+    ) -> Self {
+        Self {
+            client,
+            connection: Arc::new(RwLock::new(connection)),
+            watches: Arc::new(RwLock::new(HashMap::new())),
+            namespace: namespace.to_string(),
+        }
+    }
+
     /// Store context data
+    ///
+    /// # Errors
+    ///
+    /// Returns error if serialization or Redis fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if system time is before UNIX EPOCH.
     pub async fn set(
         &self,
         scope: ContextScope,
@@ -200,19 +277,19 @@ impl SharedContext {
         data: ContextData,
     ) -> Result<ContextResult> {
         let mut conn = self.connection.write().await;
-        let redis_key = scope.redis_key(key);
+        let redis_key = scope.redis_key(key, &self.namespace);
 
         // Serialize the context data
         let serialized = bincode::serialize(&data).map_err(|e| {
-            Error::serialization(format!("Failed to serialize context data: {}", e))
+            Error::serialization(format!("Failed to serialize context data: {e}"))
         })?;
 
         match &scope {
             ContextScope::Temporary { ttl_secs } => {
                 // Set with TTL
-                conn.set_ex::<_, _, ()>(&redis_key, &serialized, *ttl_secs as u64)
+                conn.set_ex::<_, _, ()>(&redis_key, &serialized, *ttl_secs)
                     .await
-                    .map_err(|e| Error::other(format!("Failed to set temporary context: {}", e)))?;
+                    .map_err(|e| Error::other(format!("Failed to set temporary context: {e}")))?;
             }
             _ => {
                 // Regular set operation
@@ -220,18 +297,18 @@ impl SharedContext {
                     let ttl = expires_at
                         - SystemTime::now()
                             .duration_since(UNIX_EPOCH)
-                            .unwrap()
+                            .expect("System time is before UNIX EPOCH")
                             .as_secs();
 
-                    conn.set_ex::<_, _, ()>(&redis_key, &serialized, ttl as u64)
+                    conn.set_ex::<_, _, ()>(&redis_key, &serialized, ttl)
                         .await
                         .map_err(|e| {
-                            Error::other(format!("Failed to set context with expiration: {}", e))
+                            Error::other(format!("Failed to set context with expiration: {e}"))
                         })?;
                 } else {
                     conn.set::<_, _, ()>(&redis_key, &serialized)
                         .await
-                        .map_err(|e| Error::other(format!("Failed to set context: {}", e)))?;
+                        .map_err(|e| Error::other(format!("Failed to set context: {e}")))?;
                 }
             }
         }
@@ -241,25 +318,29 @@ impl SharedContext {
     }
 
     /// Get context data
+    ///
+    /// # Errors
+    ///
+    /// Returns error if deserialization or Redis fails.
     pub async fn get(&self, scope: ContextScope, key: &str) -> Result<Option<ContextData>> {
         let mut conn = self.connection.write().await;
-        let redis_key = scope.redis_key(key);
+        let redis_key = scope.redis_key(key, &self.namespace);
 
         let data: Option<Vec<u8>> = conn
             .get(&redis_key)
             .await
-            .map_err(|e| Error::other(format!("Failed to get context: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get context: {e}")))?;
 
         if let Some(data) = data {
             let context_data: ContextData = bincode::deserialize(&data).map_err(|e| {
-                Error::serialization(format!("Failed to deserialize context data: {}", e))
+                Error::serialization(format!("Failed to deserialize context data: {e}"))
             })?;
 
             // Check if expired
             if context_data.is_expired() {
                 // Clean up expired data
                 let _: () = conn.del(&redis_key).await.map_err(|e| {
-                    Error::other(format!("Failed to delete expired context: {}", e))
+                    Error::other(format!("Failed to delete expired context: {e}"))
                 })?;
                 return Ok(None);
             }
@@ -271,6 +352,14 @@ impl SharedContext {
     }
 
     /// Update context data with optimistic locking
+    ///
+    /// # Errors
+    ///
+    /// Returns error if deserialization or Redis fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if system time is before UNIX EPOCH.
     pub async fn update(
         &self,
         scope: ContextScope,
@@ -279,7 +368,7 @@ impl SharedContext {
         expected_revision: u64,
     ) -> Result<ContextResult> {
         let mut conn = self.connection.write().await;
-        let redis_key = scope.redis_key(key);
+        let redis_key = scope.redis_key(key, &self.namespace);
 
         // Get current data to check revision
         if let Some(current) = self.get(scope.clone(), key).await? {
@@ -296,57 +385,56 @@ impl SharedContext {
         data.revision = expected_revision + 1;
         data.updated_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time is before UNIX EPOCH")
             .as_secs();
 
         // Store updated data
         let serialized = bincode::serialize(&data).map_err(|e| {
-            Error::serialization(format!("Failed to serialize updated context: {}", e))
+            Error::serialization(format!("Failed to serialize updated context: {e}"))
         })?;
 
         conn.set::<_, _, ()>(&redis_key, &serialized)
             .await
-            .map_err(|e| Error::other(format!("Failed to update context: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to update context: {e}")))?;
 
         tracing::debug!("Updated context data for key: {}", redis_key);
         Ok(ContextResult::Success)
     }
 
     /// Delete context data
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn delete(&self, scope: ContextScope, key: &str) -> Result<bool> {
         let mut conn = self.connection.write().await;
-        let redis_key = scope.redis_key(key);
+        let redis_key = scope.redis_key(key, &self.namespace);
 
         let deleted: u32 = conn
             .del(&redis_key)
             .await
-            .map_err(|e| Error::other(format!("Failed to delete context: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to delete context: {e}")))?;
 
         tracing::debug!("Deleted context data for key: {}", redis_key);
         Ok(deleted > 0)
     }
 
     /// List keys matching a pattern
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn list_keys(&self, scope: ContextScope, pattern: &str) -> Result<Vec<String>> {
         let mut conn = self.connection.write().await;
-        let redis_pattern = scope.redis_key(pattern);
+        let redis_pattern = scope.redis_key(pattern, &self.namespace);
 
         let keys: Vec<String> = conn
             .keys(&redis_pattern)
             .await
-            .map_err(|e| Error::other(format!("Failed to list keys: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to list keys: {e}")))?;
 
         // Strip the scope prefix to return clean keys
-        let prefix = match &scope {
-            ContextScope::Global => "agent_sync:context:global:".to_string(),
-            ContextScope::Session(session_id) => {
-                format!("agent_sync:context:session:{}:", session_id)
-            }
-            ContextScope::Agent(agent_id) => {
-                format!("agent_sync:context:agent:{}:", agent_id)
-            }
-            ContextScope::Temporary { .. } => "agent_sync:context:temp:".to_string(),
-        };
+        let prefix = scope.prefix(&self.namespace);
 
         let clean_keys = keys
             .into_iter()
@@ -357,40 +445,52 @@ impl SharedContext {
     }
 
     /// Check if key exists
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn exists(&self, scope: ContextScope, key: &str) -> Result<bool> {
         let mut conn = self.connection.write().await;
-        let redis_key = scope.redis_key(key);
+        let redis_key = scope.redis_key(key, &self.namespace);
 
         let exists: bool = conn
             .exists(&redis_key)
             .await
-            .map_err(|e| Error::other(format!("Failed to check key existence: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to check key existence: {e}")))?;
 
         Ok(exists)
     }
 
     /// Set TTL for existing key
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn set_ttl(&self, scope: ContextScope, key: &str, ttl: Duration) -> Result<bool> {
         let mut conn = self.connection.write().await;
-        let redis_key = scope.redis_key(key);
+        let redis_key = scope.redis_key(key, &self.namespace);
 
         let result: bool = conn
-            .expire(&redis_key, ttl.as_secs() as i64)
+            .expire(&redis_key, i64::try_from(ttl.as_secs()).unwrap_or(i64::MAX))
             .await
-            .map_err(|e| Error::other(format!("Failed to set TTL: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to set TTL: {e}")))?;
 
         Ok(result)
     }
 
     /// Get TTL for a key
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn get_ttl(&self, scope: ContextScope, key: &str) -> Result<Option<Duration>> {
         let mut conn = self.connection.write().await;
-        let redis_key = scope.redis_key(key);
+        let redis_key = scope.redis_key(key, &self.namespace);
 
         let ttl_secs: i32 = conn
             .ttl(&redis_key)
             .await
-            .map_err(|e| Error::other(format!("Failed to get TTL: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get TTL: {e}")))?;
 
         match ttl_secs {
             -1 => Ok(None), // Key exists but has no expiration
@@ -400,27 +500,35 @@ impl SharedContext {
     }
 
     /// Increment a numeric value atomically
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn increment(&self, scope: ContextScope, key: &str, amount: i64) -> Result<i64> {
         let mut conn = self.connection.write().await;
-        let redis_key = scope.redis_key(key);
+        let redis_key = scope.redis_key(key, &self.namespace);
 
         let result: i64 = conn
             .incr(&redis_key, amount)
             .await
-            .map_err(|e| Error::other(format!("Failed to increment: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to increment: {e}")))?;
 
         Ok(result)
     }
 
     /// Clear all data for a scope
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn clear_scope(&self, scope: ContextScope) -> Result<u32> {
         let mut conn = self.connection.write().await;
-        let pattern = scope.redis_key("*");
+        let pattern = scope.redis_key("*", &self.namespace);
 
         let keys: Vec<String> = conn
             .keys(&pattern)
             .await
-            .map_err(|e| Error::other(format!("Failed to get keys for clearing: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get keys for clearing: {e}")))?;
 
         if keys.is_empty() {
             return Ok(0);
@@ -429,13 +537,18 @@ impl SharedContext {
         let deleted: u32 = conn
             .del(&keys)
             .await
-            .map_err(|e| Error::other(format!("Failed to clear scope: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to clear scope: {e}")))?;
 
         tracing::debug!("Cleared {} keys for scope", deleted);
         Ok(deleted)
     }
 
     /// Shutdown the shared context manager
+    ///
+    /// # Errors
+    ///
+    /// Returns error if shutdown process fails.
+    #[allow(clippy::unused_async)]
     pub async fn shutdown(self) -> Result<()> {
         // Connection will be dropped automatically
         tracing::info!("Shared context manager shutdown completed");
@@ -452,6 +565,7 @@ mod basic_tests {
 
     #[test]
     fn test_context_scope_redis_key() {
+        let ns = crate::coordinator::task_queue::DEFAULT_NAMESPACE;
         let global_scope = ContextScope::Global;
         let session_scope = ContextScope::Session(SessionId::new());
         let agent_id = AgentId::new();
@@ -459,16 +573,16 @@ mod basic_tests {
         let temp_scope = ContextScope::Temporary { ttl_secs: 300 };
 
         assert_eq!(
-            global_scope.redis_key("test"),
-            "agent_sync:context:global:test"
+            global_scope.redis_key("test", ns),
+            format!("{}:context:global:test", ns)
         );
         assert!(session_scope
-            .redis_key("test")
-            .starts_with("agent_sync:context:session:"));
+            .redis_key("test", ns)
+            .starts_with(&format!("{}:context:session:", ns)));
         assert!(agent_scope
-            .redis_key("test")
+            .redis_key("test", ns)
             .contains(&agent_id.to_string()));
-        assert_eq!(temp_scope.redis_key("test"), "agent_sync:context:temp:test");
+        assert_eq!(temp_scope.redis_key("test", ns), format!("{}:context:temp:test", ns));
     }
 
     #[test]
@@ -526,3 +640,6 @@ mod basic_tests {
         assert!(data.is_expired());
     }
 }
+
+
+

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Test fixtures for agent-sync testing
 //!
 //! This module provides reusable test fixtures and data for testing
@@ -10,14 +11,21 @@ use uuid::Uuid;
 
 use crate::coordinator::{
     ContextData, ContextScope, CoordinatorConfig, Notification, NotificationFilter,
-    NotificationPriority, NotificationType, Task, TaskPriority, TaskResult, TaskStatus,
+    NotificationPriority, NotificationType, Task, TaskPriority, TaskResult,
 };
 use crate::{AgentId, SessionId};
 
 /// Standard test configuration for coordinator
 pub fn test_coordinator_config() -> CoordinatorConfig {
+    let redis_url = if cfg!(target_os = "windows") {
+        "redis://localhost:6380".to_string()
+    } else {
+        "redis://localhost:6379".to_string()
+    };
+
     CoordinatorConfig {
-        redis_url: "redis://localhost:6379".to_string(),
+        redis_url,
+        namespace: crate::coordinator::task_queue::DEFAULT_NAMESPACE.to_string(),
         max_concurrent_tasks: 10,
         task_timeout_secs: 60,
         enable_metrics: false, // Disable for tests
@@ -93,8 +101,8 @@ pub fn test_tasks_mixed_priority(agent_id: AgentId, count: usize) -> Vec<Task> {
             };
 
             Task::new(
-                format!("task_{}", i),
-                format!("payload_{}", i).into_bytes(),
+                format!("task_{i}"),
+                format!("payload_{i}").into_bytes(),
                 agent_id,
             )
             .with_priority(priority)
@@ -200,7 +208,7 @@ pub fn test_custom_notification(agent_id: AgentId, category: &str) -> Notificati
             category: category.to_string(),
             data,
         },
-        format!("Custom notification: {}", category).into_bytes(),
+        format!("Custom notification: {category}").into_bytes(),
         agent_id,
     )
 }
@@ -226,7 +234,7 @@ pub fn test_notifications_mixed_priority(agent_id: AgentId, count: usize) -> Vec
                         data
                     },
                 },
-                format!("notification_{}", i).into_bytes(),
+                format!("notification_{i}").into_bytes(),
                 agent_id,
             )
             .with_priority(priority)
@@ -274,8 +282,8 @@ pub fn test_notification_filters(agent_id: AgentId) -> Vec<NotificationFilter> {
         NotificationFilter::new().with_min_priority(NotificationPriority::High),
         // Filter by type
         NotificationFilter::new().with_types(vec![NotificationType::System {
-            component: "".to_string(),
-            level: "".to_string(),
+            component: String::new(),
+            level: String::new(),
         }]),
         // Complex filter
         NotificationFilter::new()
@@ -315,8 +323,8 @@ impl PerformanceTestData {
         (0..count)
             .map(|i| {
                 Task::new(
-                    format!("perf_task_{:06}", i),
-                    format!("performance_payload_{}", i).into_bytes(),
+                    format!("perf_task_{i:06}"),
+                    format!("performance_payload_{i}").into_bytes(),
                     agent_id,
                 )
                 .with_priority(match i % 10 {
@@ -334,9 +342,9 @@ impl PerformanceTestData {
     pub fn context_data(count: usize, agent_id: AgentId) -> Vec<(String, ContextData)> {
         (0..count)
             .map(|i| {
-                let key = format!("perf_key_{:06}", i);
+                let key = format!("perf_key_{i:06}");
                 let data = ContextData::new(
-                    format!("performance_data_{}", i).into_bytes(),
+                    format!("performance_data_{i}").into_bytes(),
                     "String".to_string(),
                     agent_id,
                 );
@@ -359,7 +367,7 @@ impl PerformanceTestData {
                             data
                         },
                     },
-                    format!("performance_notification_{}", i).into_bytes(),
+                    format!("performance_notification_{i}").into_bytes(),
                     agent_id,
                 )
                 .with_priority(match i % 4 {
@@ -380,11 +388,16 @@ pub struct ErrorTestCases;
 impl ErrorTestCases {
     /// Get invalid Redis URLs for connection testing
     pub fn invalid_redis_urls() -> Vec<String> {
+        let default_port = if cfg!(target_os = "windows") {
+            6380
+        } else {
+            6379
+        };
         vec![
             "redis://invalid:1234".to_string(),
-            "invalid://localhost:6379".to_string(),
-            "redis://nonexistent.host:6379".to_string(),
-            "".to_string(),
+            format!("invalid://localhost:{}", default_port),
+            format!("redis://nonexistent.host:{}", default_port),
+            String::new(),
             "not-a-url".to_string(),
         ]
     }
@@ -410,7 +423,7 @@ impl ErrorTestCases {
     /// Get invalid context keys
     pub fn invalid_context_keys() -> Vec<String> {
         vec![
-            "".to_string(),
+            String::new(),
             " ".to_string(),
             "\n".to_string(),
             "\t".to_string(),
@@ -444,12 +457,12 @@ impl TestTiming {
     }
 
     /// Create a duration from seconds
-    pub fn duration_secs(secs: u64) -> Duration {
+    pub const fn duration_secs(secs: u64) -> Duration {
         Duration::from_secs(secs)
     }
 
     /// Create a duration from milliseconds
-    pub fn duration_millis(millis: u64) -> Duration {
+    pub const fn duration_millis(millis: u64) -> Duration {
         Duration::from_millis(millis)
     }
 }
@@ -555,3 +568,6 @@ mod tests {
         assert_eq!(test_data.context_scopes.len(), 4);
     }
 }
+
+
+

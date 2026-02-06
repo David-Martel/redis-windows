@@ -82,10 +82,12 @@ pub struct Notification {
 
 /// Notification priority levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum NotificationPriority {
     /// Low priority notifications
     Low = 0,
     /// Normal priority notifications
+    #[default]
     Normal = 1,
     /// High priority notifications
     High = 2,
@@ -93,11 +95,6 @@ pub enum NotificationPriority {
     Critical = 3,
 }
 
-impl Default for NotificationPriority {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
 
 impl Notification {
     /// Create a new notification
@@ -110,7 +107,7 @@ impl Notification {
             recipients: Vec::new(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("System time is before UNIX EPOCH")
                 .as_secs(),
             priority: NotificationPriority::default(),
             ttl_secs: None,
@@ -119,51 +116,59 @@ impl Notification {
     }
 
     /// Set specific recipients
+    #[must_use]
     pub fn with_recipients(mut self, recipients: Vec<AgentId>) -> Self {
         self.recipients = recipients;
         self
     }
 
     /// Set priority
-    pub fn with_priority(mut self, priority: NotificationPriority) -> Self {
+    #[must_use]
+    pub const fn with_priority(mut self, priority: NotificationPriority) -> Self {
         self.priority = priority;
         self
     }
 
     /// Set TTL
-    pub fn with_ttl(mut self, ttl: Duration) -> Self {
+    #[must_use]
+    pub const fn with_ttl(mut self, ttl: Duration) -> Self {
         self.ttl_secs = Some(ttl.as_secs());
         self
     }
 
     /// Add metadata
+    #[must_use]
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value);
         self
     }
 
     /// Check if notification is expired
+    /// Check if notification is expired
+    ///
+    /// # Panics
+    ///
+    /// Panics if system time is before UNIX EPOCH.
+    #[must_use]
     pub fn is_expired(&self) -> bool {
-        if let Some(ttl_secs) = self.ttl_secs {
+        self.ttl_secs.map_or(false, |ttl_secs| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("System time is before UNIX EPOCH")
                 .as_secs();
             (now - self.timestamp) > ttl_secs
-        } else {
-            false
-        }
+        })
     }
 
-    /// Get channel name for this notification type
-    pub fn channel_name(&self) -> String {
+    /// Get channel name for this notification type with a given namespace
+    pub fn channel_name(&self, namespace: &str) -> String {
         match &self.notification_type {
-            NotificationType::Task { .. } => "agent_sync:notifications:task".to_string(),
-            NotificationType::Context { .. } => "agent_sync:notifications:context".to_string(),
-            NotificationType::Agent { .. } => "agent_sync:notifications:agent".to_string(),
-            NotificationType::System { .. } => "agent_sync:notifications:system".to_string(),
+            NotificationType::Task { .. } => format!("{namespace}:notifications:task"),
+            NotificationType::Context { .. } => format!("{namespace}:notifications:context"),
+            NotificationType::Agent { .. } => format!("{namespace}:notifications:agent"),
+            NotificationType::System { .. } => format!("{namespace}:notifications:system"),
             NotificationType::Custom { category, .. } => {
-                format!("agent_sync:notifications:custom:{}", category)
+                format!("{namespace}:notifications:custom:{category}")
             }
         }
     }
@@ -194,24 +199,28 @@ impl NotificationFilter {
     }
 
     /// Filter by types
+    #[must_use]
     pub fn with_types(mut self, types: Vec<NotificationType>) -> Self {
         self.types = Some(types);
         self
     }
 
     /// Filter by sender
-    pub fn with_sender(mut self, sender: AgentId) -> Self {
+    #[must_use]
+    pub const fn with_sender(mut self, sender: AgentId) -> Self {
         self.sender = Some(sender);
         self
     }
 
     /// Filter by minimum priority
-    pub fn with_min_priority(mut self, priority: NotificationPriority) -> Self {
+    #[must_use]
+    pub const fn with_min_priority(mut self, priority: NotificationPriority) -> Self {
         self.min_priority = Some(priority);
         self
     }
 
     /// Add metadata filter
+    #[must_use]
     pub fn with_metadata_filter(mut self, key: String, value: String) -> Self {
         self.metadata_filters.insert(key, value);
         self
@@ -296,18 +305,32 @@ pub struct NotificationBus {
     subscribers: Arc<RwLock<HashMap<Uuid, Subscriber>>>,
     stats: Arc<RwLock<NotificationStats>>,
     shutdown_sender: Option<mpsc::UnboundedSender<()>>,
+    namespace: String,
 }
 
 impl NotificationBus {
     /// Create a new notification bus
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails.
     pub async fn new(redis_url: &str) -> Result<Self> {
+        Self::new_with_namespace(redis_url, crate::coordinator::task_queue::DEFAULT_NAMESPACE).await
+    }
+
+    /// Create a new notification bus
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. with a custom namespace
+    pub async fn new_with_namespace(redis_url: &str, namespace: &str) -> Result<Self> {
         let client = Client::open(redis_url)
-            .map_err(|e| Error::connection(format!("Failed to create Redis client: {}", e)))?;
+            .map_err(|e| Error::connection(format!("Failed to create Redis client: {e}")))?;
 
         let connection = client
             .get_multiplexed_async_connection()
             .await
-            .map_err(|e| Error::connection(format!("Failed to connect to Redis: {}", e)))?;
+            .map_err(|e| Error::connection(format!("Failed to connect to Redis: {e}")))?;
 
         Ok(Self {
             client,
@@ -315,24 +338,68 @@ impl NotificationBus {
             subscribers: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(NotificationStats::default())),
             shutdown_sender: None,
+            namespace: namespace.to_string(),
         })
     }
 
+    /// Create a new notification bus
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. using existing connections.
+    ///
+    /// `connection` is used for publish operations. `client` is used for creating
+    /// the dedicated pub/sub subscription connection.
+    pub fn new_with_connections(
+        client: Client,
+        connection: redis::aio::MultiplexedConnection,
+    ) -> Self {
+        Self::new_with_namespace_and_connections(
+            client,
+            connection,
+            crate::coordinator::task_queue::DEFAULT_NAMESPACE,
+        )
+    }
+
+    /// Create a new notification bus
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. using existing connections and custom namespace.
+    pub fn new_with_namespace_and_connections(
+        client: Client,
+        connection: redis::aio::MultiplexedConnection,
+        namespace: &str,
+    ) -> Self {
+        Self {
+            client,
+            connection: Arc::new(RwLock::new(connection)),
+            subscribers: Arc::new(RwLock::new(HashMap::new())),
+            stats: Arc::new(RwLock::new(NotificationStats::default())),
+            shutdown_sender: None,
+            namespace: namespace.to_string(),
+        }
+    }
+
     /// Publish a notification
+    ///
+    /// # Errors
+    ///
+    /// Returns error if serialization or Redis fails.
     pub async fn publish(&self, notification: Notification) -> Result<u64> {
         let mut conn = self.connection.write().await;
-        let channel = notification.channel_name();
+        let channel = notification.channel_name(&self.namespace);
 
         // Serialize notification
         let serialized = bincode::serialize(&notification).map_err(|e| {
-            Error::serialization(format!("Failed to serialize notification: {}", e))
+            Error::serialization(format!("Failed to serialize notification: {e}"))
         })?;
 
         // Publish to Redis channel
         let subscriber_count: u64 = conn
             .publish(&channel, &serialized)
             .await
-            .map_err(|e| Error::other(format!("Failed to publish notification: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to publish notification: {e}")))?;
 
         // Update statistics
         let mut stats = self.stats.write().await;
@@ -362,6 +429,14 @@ impl NotificationBus {
     }
 
     /// Subscribe to notifications
+    ///
+    /// # Errors
+    ///
+    /// Returns error if background task fails to start.
+    ///
+    /// # Panics
+    ///
+    /// Panics if system time is before UNIX EPOCH.
     pub async fn subscribe(
         &self,
         agent_id: AgentId,
@@ -377,7 +452,7 @@ impl NotificationBus {
             sender,
             subscribed_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("System time is before UNIX EPOCH")
                 .as_secs(),
         };
 
@@ -406,6 +481,10 @@ impl NotificationBus {
     }
 
     /// Unsubscribe from notifications
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn unsubscribe(&self, subscription_id: Uuid) -> Result<bool> {
         let removed = {
             let mut subscribers = self.subscribers.write().await;
@@ -432,22 +511,24 @@ impl NotificationBus {
         let subscribers = Arc::clone(&self.subscribers);
         let stats = Arc::clone(&self.stats);
 
+        let namespace = self.namespace.clone();
+
         tokio::spawn(async move {
-            let mut pubsub = match client.get_async_connection().await {
-                Ok(conn) => conn.into_pubsub(),
+            let mut pubsub = match client.get_async_pubsub().await {
+                Ok(pubsub) => pubsub,
                 Err(e) => {
                     tracing::error!("Failed to create pubsub connection: {}", e);
                     return;
                 }
             };
 
-            // Subscribe to all notification channels
+            // Subscribe to all notification channels in the given namespace
             let channels = [
-                "agent_sync:notifications:task",
-                "agent_sync:notifications:context",
-                "agent_sync:notifications:agent",
-                "agent_sync:notifications:system",
-                "agent_sync:notifications:custom:*",
+                format!("{namespace}:notifications:task"),
+                format!("{namespace}:notifications:context"),
+                format!("{namespace}:notifications:agent"),
+                format!("{namespace}:notifications:system"),
+                format!("{namespace}:notifications:custom:*"),
             ];
 
             for channel in &channels {
@@ -469,11 +550,15 @@ impl NotificationBus {
                     // Handle incoming notifications
                     msg = message_stream.next() => {
                         if let Some(msg) = msg {
-                            if let Ok(payload) = msg.get_payload::<String>() {
-                                let payload_bytes = payload.into_bytes();
-                                if let Ok(notification) = bincode::deserialize::<Notification>(&payload_bytes) {
-                                    Self::distribute_notification(&subscribers, &stats, notification).await;
+                            let payload: Vec<u8> = match msg.get_payload() {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    tracing::error!("Failed to get notification payload: {}", e);
+                                    continue;
                                 }
+                            };
+                            if let Ok(notification) = bincode::deserialize::<Notification>(&payload) {
+                                Self::distribute_notification(&subscribers, &stats, notification).await;
                             }
                         }
                     }
@@ -531,6 +616,10 @@ impl NotificationBus {
     }
 
     /// Broadcast system notification
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn broadcast_system(
         &self,
         component: &str,
@@ -553,10 +642,37 @@ impl NotificationBus {
             _ => NotificationPriority::Low,
         });
 
-        self.publish(notification).await
+        let mut conn = self.connection.write().await;
+        let channel = notification.channel_name(&self.namespace);
+
+        // Serialize notification
+        let serialized = bincode::serialize(&notification).map_err(|e| {
+            Error::serialization(format!("Failed to serialize notification: {e}"))
+        })?;
+
+        // Publish to Redis channel
+        let subscriber_count: u64 = conn
+            .publish(&channel, &serialized)
+            .await
+            .map_err(|e| Error::other(format!("Failed to publish system notification: {e}")))?;
+
+        // Update statistics
+        let mut stats = self.stats.write().await;
+        stats.total_sent += 1;
+        *stats.type_counts.entry("system".to_string()).or_insert(0) += 1;
+        *stats
+            .priority_counts
+            .entry(notification.priority as u8)
+            .or_insert(0) += 1;
+
+        Ok(subscriber_count)
     }
 
     /// Cleanup expired notifications and dead subscribers
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn cleanup(&self) -> Result<(u32, u32)> {
         let mut subscribers = self.subscribers.write().await;
         let mut removed_subscribers = 0;
@@ -575,7 +691,7 @@ impl NotificationBus {
             let mut stats = self.stats.write().await;
             stats.active_subscribers = stats
                 .active_subscribers
-                .saturating_sub(removed_subscribers as u64);
+                .saturating_sub(u64::from(removed_subscribers));
         }
 
         tracing::debug!("Cleanup removed {} dead subscribers", removed_subscribers);
@@ -583,6 +699,11 @@ impl NotificationBus {
     }
 
     /// Shutdown the notification bus
+    ///
+    /// # Errors
+    ///
+    /// Returns error if shutdown fails.
+    #[allow(clippy::unused_async)]
     pub async fn shutdown(mut self) -> Result<()> {
         if let Some(shutdown_sender) = self.shutdown_sender.take() {
             let _ = shutdown_sender.send(());
@@ -629,6 +750,7 @@ mod basic_tests {
 
     #[test]
     fn test_notification_channel_names() {
+        let ns = crate::coordinator::task_queue::DEFAULT_NAMESPACE;
         let task_notification = Notification::new(
             NotificationType::Task {
                 task_id: Uuid::new_v4(),
@@ -658,16 +780,16 @@ mod basic_tests {
         );
 
         assert_eq!(
-            task_notification.channel_name(),
-            "agent_sync:notifications:task"
+            task_notification.channel_name(ns),
+            format!("{}:notifications:task", ns)
         );
         assert_eq!(
-            context_notification.channel_name(),
-            "agent_sync:notifications:context"
+            context_notification.channel_name(ns),
+            format!("{}:notifications:context", ns)
         );
         assert_eq!(
-            custom_notification.channel_name(),
-            "agent_sync:notifications:custom:metrics"
+            custom_notification.channel_name(ns),
+            format!("{}:notifications:custom:metrics", ns)
         );
     }
 
@@ -743,10 +865,13 @@ mod basic_tests {
         notification.ttl_secs = Some(1);
         notification.timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time is before UNIX EPOCH")
             .as_secs()
             - 2; // 2 seconds ago
 
         assert!(notification.is_expired());
     }
 }
+
+
+

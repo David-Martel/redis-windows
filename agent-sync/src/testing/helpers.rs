@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Test helper functions and utilities
 //!
 //! This module provides utility functions to make testing easier
@@ -14,7 +15,7 @@ use crate::coordinator::{
     ContextData, ContextScope, Coordinator, CoordinatorConfig, Notification, NotificationFilter,
     Task, TaskResult, TaskStatus,
 };
-use crate::{AgentId, Error, Result, SessionId};
+use crate::{AgentId, Error, Result};
 
 /// Utility functions for async testing
 pub struct AsyncTestHelpers;
@@ -190,8 +191,7 @@ impl TaskQueueTestHelpers {
 
         if actual_discriminant != expected_discriminant {
             return Err(Error::other(format!(
-                "Task status mismatch. Expected: {:?}, Actual: {:?}",
-                expected_discriminant, actual_discriminant
+                "Task status mismatch. Expected: {expected_discriminant:?}, Actual: {actual_discriminant:?}"
             )));
         }
 
@@ -259,7 +259,7 @@ impl SharedContextTestHelpers {
                 shared_context
                     .exists(scope.clone(), key)
                     .await
-                    .unwrap_or(false)
+                    .expect("Failed to check key existence in wait_for_key_exists")
             },
             timeout_duration,
             Duration::from_millis(50),
@@ -279,7 +279,7 @@ impl SharedContextTestHelpers {
                 !shared_context
                     .exists(scope.clone(), key)
                     .await
-                    .unwrap_or(true)
+                    .expect("Failed to check key existence in wait_for_key_deleted")
             },
             timeout_duration,
             Duration::from_millis(50),
@@ -391,7 +391,7 @@ impl CoordinatorTestHelpers {
     /// Run a complete task workflow for testing
     pub async fn run_task_workflow(
         coordinator: &Coordinator,
-        producer_agent: AgentId,
+        _producer_agent: AgentId,
         worker_agent: AgentId,
         tasks: Vec<Task>,
     ) -> Result<Vec<TaskResult>> {
@@ -426,7 +426,7 @@ impl CoordinatorTestHelpers {
     /// Test complete pub-sub workflow
     pub async fn test_pubsub_workflow(
         coordinator: &Coordinator,
-        publisher: AgentId,
+        _publisher: AgentId,
         subscribers: Vec<AgentId>,
         notifications: Vec<Notification>,
     ) -> Result<Vec<Vec<Notification>>> {
@@ -492,7 +492,7 @@ impl PerformanceTestHelpers {
         let mut errors = Vec::new();
 
         for _ in 0..iterations {
-            let (result, duration) = Self::measure_time(|| operation()).await;
+            let (result, duration) = Self::measure_time(&operation).await;
 
             durations.push(duration);
 
@@ -589,15 +589,14 @@ impl AssertionHelpers {
         tolerance: Duration,
     ) -> Result<()> {
         let diff = if actual > expected {
-            actual - expected
+            actual.checked_sub(expected).unwrap()
         } else {
-            expected - actual
+            expected.checked_sub(actual).unwrap()
         };
 
         if diff > tolerance {
             return Err(Error::other(format!(
-                "Duration assertion failed: actual {:?}, expected {:?}, tolerance {:?}",
-                actual, expected, tolerance
+                "Duration assertion failed: actual {actual:?}, expected {expected:?}, tolerance {tolerance:?}"
             )));
         }
 
@@ -611,8 +610,7 @@ impl AssertionHelpers {
     {
         if actual < min || actual > max {
             return Err(Error::other(format!(
-                "Value {:?} is not in range [{:?}, {:?}]",
-                actual, min, max
+                "Value {actual:?} is not in range [{min:?}, {max:?}]"
             )));
         }
 
@@ -627,8 +625,7 @@ impl AssertionHelpers {
         for item in expected {
             if !collection.contains(item) {
                 return Err(Error::other(format!(
-                    "Collection does not contain expected item: {:?}",
-                    item
+                    "Collection does not contain expected item: {item:?}"
                 )));
             }
         }
@@ -640,7 +637,6 @@ impl AssertionHelpers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::fixtures::*;
 
     #[tokio::test]
     async fn test_async_wait_for() {
@@ -651,10 +647,12 @@ mod tests {
                 let counter = counter.clone();
                 move || {
                     let counter = counter.clone();
-                    async move {
-                        *counter.lock().unwrap() += 1;
-                        *counter.lock().unwrap() >= 3
-                    }
+                    let fut = async move {
+                        let mut val = counter.lock().expect("Failed to lock counter");
+                        *val += 1;
+                        *val >= 3
+                    };
+                    Box::pin(fut)
                 }
             },
             Duration::from_secs(1),
@@ -663,20 +661,27 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        assert!(*counter.lock().unwrap() >= 3);
+        assert!(*counter.lock().expect("Failed to lock counter") >= 3);
     }
 
     #[tokio::test]
     async fn test_async_retry() {
-        let mut attempt_count = 0;
+        let attempt_count = Arc::new(std::sync::Mutex::new(0));
 
         let result = AsyncTestHelpers::retry(
-            || async {
-                attempt_count += 1;
-                if attempt_count < 3 {
-                    Err(Error::other("Not ready yet".to_string()))
-                } else {
-                    Ok("success")
+            {
+                let attempt_count = attempt_count.clone();
+                move || {
+                    let attempt_count = attempt_count.clone();
+                    Box::pin(async move {
+                        let mut count = attempt_count.lock().expect("Failed to lock attempt_count");
+                        *count += 1;
+                        if *count < 3 {
+                            Err(Error::other("Not ready yet".to_string()))
+                        } else {
+                            Ok("success")
+                        }
+                    })
                 }
             },
             5,
@@ -685,8 +690,8 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "success");
-        assert_eq!(attempt_count, 3);
+        assert_eq!(result.expect("Failed to get result"), "success");
+        assert_eq!(*attempt_count.lock().expect("Failed to lock attempt_count"), 3);
     }
 
     #[tokio::test]
@@ -744,3 +749,14 @@ mod tests {
         assert!(result.is_ok());
     }
 }
+
+
+
+
+
+
+
+
+
+
+

@@ -16,10 +16,12 @@ use crate::{AgentId, Error, Result};
 
 /// Task priority levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TaskPriority {
     /// Low priority tasks
     Low = 0,
     /// Normal priority tasks
+    #[default]
     Normal = 1,
     /// High priority tasks
     High = 2,
@@ -27,11 +29,6 @@ pub enum TaskPriority {
     Critical = 3,
 }
 
-impl Default for TaskPriority {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
 
 /// Task execution status
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +94,8 @@ pub struct Task {
     pub timeout_secs: u64,
     /// Tags for categorization
     pub tags: Vec<String>,
+    /// Additional metadata
+    pub metadata: HashMap<String, String>,
 }
 
 impl Task {
@@ -104,7 +103,7 @@ impl Task {
     pub fn new(name: impl Into<String>, payload: Vec<u8>, created_by: AgentId) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time is before UNIX EPOCH")
             .as_secs();
 
         Self {
@@ -120,48 +119,72 @@ impl Task {
             max_retries: 3,
             timeout_secs: 300,
             tags: Vec::new(),
+            metadata: HashMap::new(),
         }
     }
 
     /// Set task priority
-    pub fn with_priority(mut self, priority: TaskPriority) -> Self {
+    #[must_use]
+    pub const fn with_priority(mut self, priority: TaskPriority) -> Self {
         self.priority = priority;
         self
     }
 
     /// Set task deadline
+    #[must_use]
     pub fn with_deadline(mut self, deadline: SystemTime) -> Self {
-        self.deadline = Some(deadline.duration_since(UNIX_EPOCH).unwrap().as_secs());
+        self.deadline = Some(
+            deadline
+                .duration_since(UNIX_EPOCH)
+                .expect("Deadline is before UNIX EPOCH")
+                .as_secs(),
+        );
         self
     }
 
     /// Set task timeout
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    #[must_use]
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout_secs = timeout.as_secs();
         self
     }
 
     /// Add tags to task
+        /// Add metadata to the task.
+    /// Add metadata to the task.
+    /// Add metadata to the task.
+    #[must_use]
+    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    /// Set task tags.
+    #[must_use]
     pub fn with_tags(mut self, tags: Vec<String>) -> Self {
         self.tags = tags;
         self
     }
 
     /// Check if task is expired
+    /// Check if task is expired
+    ///
+    /// # Panics
+    ///
+    /// Panics if system time is before UNIX EPOCH.
+    #[must_use]
     pub fn is_expired(&self) -> bool {
-        if let Some(deadline) = self.deadline {
+        self.deadline.map_or(false, |deadline| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("System time is before UNIX EPOCH")
                 .as_secs();
             now > deadline
-        } else {
-            false
-        }
+        })
     }
 
     /// Check if task can be retried
-    pub fn can_retry(&self) -> bool {
+    pub const fn can_retry(&self) -> bool {
         self.retry_count < self.max_retries
     }
 }
@@ -183,8 +206,12 @@ pub struct TaskQueueStats {
     pub avg_processing_time_ms: f64,
 }
 
+/// Default key prefix for agent-sync
+pub const DEFAULT_NAMESPACE: &str = "agent_sync";
+
 /// Distributed task queue implementation
-pub struct TaskQueue {
+#[derive(Clone)]
+    pub struct TaskQueue {
     #[allow(dead_code)]
     client: Client,
     connection: Arc<RwLock<redis::aio::MultiplexedConnection>>,
@@ -195,39 +222,88 @@ pub struct TaskQueue {
 }
 
 impl TaskQueue {
-    /// Redis key prefixes
-    const QUEUE_PREFIX: &'static str = "agent_sync:task_queue";
-    const PROCESSING_PREFIX: &'static str = "agent_sync:task_processing";
-    const COMPLETED_PREFIX: &'static str = "agent_sync:task_completed";
-    const FAILED_PREFIX: &'static str = "agent_sync:task_failed";
+    /// Redis key sub-prefixes
+    const QUEUE_SUFFIX: &'static str = "task_queue:pending";
+    const PROCESSING_SUFFIX: &'static str = "task_processing";
+    const COMPLETED_SUFFIX: &'static str = "task_completed";
+    const FAILED_SUFFIX: &'static str = "task_failed";
 
     /// Create a new task queue
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails.
     pub async fn new(redis_url: &str) -> Result<Self> {
+        Self::new_with_namespace(redis_url, DEFAULT_NAMESPACE).await
+    }
+
+    /// Create a new task queue
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. with a custom namespace
+    pub async fn new_with_namespace(redis_url: &str, namespace: &str) -> Result<Self> {
         let client = Client::open(redis_url)
-            .map_err(|e| Error::connection(format!("Failed to create Redis client: {}", e)))?;
+            .map_err(|e| Error::connection(format!("Failed to create Redis client: {e}")))?;
 
         let connection = client
             .get_multiplexed_async_connection()
             .await
-            .map_err(|e| Error::connection(format!("Failed to connect to Redis: {}", e)))?;
+            .map_err(|e| Error::connection(format!("Failed to connect to Redis: {e}")))?;
 
         Ok(Self {
             client,
             connection: Arc::new(RwLock::new(connection)),
-            queue_key: format!("{}:pending", Self::QUEUE_PREFIX),
-            processing_key: format!("{}:processing", Self::PROCESSING_PREFIX),
-            completed_key: format!("{}:completed", Self::COMPLETED_PREFIX),
-            failed_key: format!("{}:failed", Self::FAILED_PREFIX),
+            queue_key: format!("{}:{}", namespace, Self::QUEUE_SUFFIX),
+            processing_key: format!("{}:{}", namespace, Self::PROCESSING_SUFFIX),
+            completed_key: format!("{}:{}", namespace, Self::COMPLETED_SUFFIX),
+            failed_key: format!("{}:{}", namespace, Self::FAILED_SUFFIX),
         })
     }
 
+    /// Create a new task queue
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. using an existing multiplexed connection.
+    pub fn new_with_connection(
+        client: Client,
+        connection: redis::aio::MultiplexedConnection,
+    ) -> Self {
+        Self::new_with_namespace_and_connection(client, connection, DEFAULT_NAMESPACE)
+    }
+
+    /// Create a new task queue
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis connection fails. using an existing multiplexed connection and a custom namespace.
+    pub fn new_with_namespace_and_connection(
+        client: Client,
+        connection: redis::aio::MultiplexedConnection,
+        namespace: &str,
+    ) -> Self {
+        Self {
+            client,
+            connection: Arc::new(RwLock::new(connection)),
+            queue_key: format!("{}:{}", namespace, Self::QUEUE_SUFFIX),
+            processing_key: format!("{}:{}", namespace, Self::PROCESSING_SUFFIX),
+            completed_key: format!("{}:{}", namespace, Self::COMPLETED_SUFFIX),
+            failed_key: format!("{}:{}", namespace, Self::FAILED_SUFFIX),
+        }
+    }
+
     /// Enqueue a task
+    ///
+    /// # Errors
+    ///
+    /// Returns error if serialization or Redis fails.
     pub async fn enqueue(&self, task: Task) -> Result<()> {
         let mut conn = self.connection.write().await;
 
         // Serialize task
         let task_data = bincode::serialize(&task)
-            .map_err(|e| Error::serialization(format!("Failed to serialize task: {}", e)))?;
+            .map_err(|e| Error::serialization(format!("Failed to serialize task: {e}")))?;
 
         // Use priority as score for sorted set
         let score = task.priority as i64;
@@ -235,7 +311,7 @@ impl TaskQueue {
         // Add to priority queue
         conn.zadd::<_, _, _, ()>(&self.queue_key, &task_data, score)
             .await
-            .map_err(|e| Error::other(format!("Failed to enqueue task: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to enqueue task: {e}")))?;
 
         tracing::debug!(
             "Enqueued task {} with priority {:?}",
@@ -246,6 +322,10 @@ impl TaskQueue {
     }
 
     /// Dequeue the highest priority task
+    ///
+    /// # Errors
+    ///
+    /// Returns error if serialization or Redis fails.
     pub async fn dequeue(&self, agent_id: AgentId) -> Result<Option<Task>> {
         let mut conn = self.connection.write().await;
 
@@ -253,24 +333,24 @@ impl TaskQueue {
         let result: Option<(Vec<u8>, f64)> = conn
             .zpopmax(&self.queue_key, 1)
             .await
-            .map_err(|e| Error::other(format!("Failed to dequeue task: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to dequeue task: {e}")))?;
 
         if let Some((task_data, _score)) = result {
             let mut task: Task = bincode::deserialize(&task_data)
-                .map_err(|e| Error::serialization(format!("Failed to deserialize task: {}", e)))?;
+                .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
 
             // Update task status
             task.status = TaskStatus::InProgress { agent_id };
 
             // Move to processing queue
             let processing_data = bincode::serialize(&task).map_err(|e| {
-                Error::serialization(format!("Failed to serialize processing task: {}", e))
+                Error::serialization(format!("Failed to serialize processing task: {e}"))
             })?;
 
             conn.hset::<_, _, _, ()>(&self.processing_key, task.id.to_string(), &processing_data)
                 .await
                 .map_err(|e| {
-                    Error::other(format!("Failed to add task to processing queue: {}", e))
+                    Error::other(format!("Failed to add task to processing queue: {e}"))
                 })?;
 
             tracing::debug!("Dequeued task {} for agent {}", task.id, agent_id);
@@ -281,6 +361,10 @@ impl TaskQueue {
     }
 
     /// Complete a task
+    ///
+    /// # Errors
+    ///
+    /// Returns error if serialization or Redis fails.
     pub async fn complete_task(&self, task_id: Uuid, result: TaskResult) -> Result<()> {
         let mut conn = self.connection.write().await;
 
@@ -288,17 +372,17 @@ impl TaskQueue {
         let task_data: Vec<u8> = conn
             .hget(&self.processing_key, task_id.to_string())
             .await
-            .map_err(|e| Error::other(format!("Failed to get processing task: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get processing task: {e}")))?;
 
         let mut task: Task = bincode::deserialize(&task_data)
-            .map_err(|e| Error::serialization(format!("Failed to deserialize task: {}", e)))?;
+            .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
 
         // Update task status
         task.status = TaskStatus::Completed { result };
 
         // Serialize updated task
         let completed_data = bincode::serialize(&task).map_err(|e| {
-            Error::serialization(format!("Failed to serialize completed task: {}", e))
+            Error::serialization(format!("Failed to serialize completed task: {e}"))
         })?;
 
         // Move to completed queue and remove from processing
@@ -307,13 +391,17 @@ impl TaskQueue {
             .hdel(&self.processing_key, task_id.to_string())
             .query_async(&mut *conn)
             .await
-            .map_err(|e| Error::other(format!("Failed to complete task: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to complete task: {e}")))?;
 
         tracing::debug!("Completed task {}", task_id);
         Ok(())
     }
 
     /// Fail a task
+    ///
+    /// # Errors
+    ///
+    /// Returns error if serialization or Redis fails.
     pub async fn fail_task(&self, task_id: Uuid, error: String) -> Result<()> {
         let mut conn = self.connection.write().await;
 
@@ -321,10 +409,10 @@ impl TaskQueue {
         let task_data: Vec<u8> = conn
             .hget(&self.processing_key, task_id.to_string())
             .await
-            .map_err(|e| Error::other(format!("Failed to get processing task: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get processing task: {e}")))?;
 
         let mut task: Task = bincode::deserialize(&task_data)
-            .map_err(|e| Error::serialization(format!("Failed to deserialize task: {}", e)))?;
+            .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
 
         // Check if task can be retried
         if task.can_retry() {
@@ -333,7 +421,7 @@ impl TaskQueue {
 
             // Re-enqueue for retry
             let retry_data = bincode::serialize(&task).map_err(|e| {
-                Error::serialization(format!("Failed to serialize retry task: {}", e))
+                Error::serialization(format!("Failed to serialize retry task: {e}"))
             })?;
 
             let score = task.priority as i64;
@@ -343,7 +431,7 @@ impl TaskQueue {
                 .hdel(&self.processing_key, task_id.to_string())
                 .query_async(&mut *conn)
                 .await
-                .map_err(|e| Error::other(format!("Failed to retry task: {}", e)))?;
+                .map_err(|e| Error::other(format!("Failed to retry task: {e}")))?;
 
             tracing::debug!("Retrying task {} (attempt {})", task_id, task.retry_count);
         } else {
@@ -351,7 +439,7 @@ impl TaskQueue {
             task.status = TaskStatus::Failed { error };
 
             let failed_data = bincode::serialize(&task).map_err(|e| {
-                Error::serialization(format!("Failed to serialize failed task: {}", e))
+                Error::serialization(format!("Failed to serialize failed task: {e}"))
             })?;
 
             let _: () = redis::pipe()
@@ -359,7 +447,7 @@ impl TaskQueue {
                 .hdel(&self.processing_key, task_id.to_string())
                 .query_async(&mut *conn)
                 .await
-                .map_err(|e| Error::other(format!("Failed to fail task: {}", e)))?;
+                .map_err(|e| Error::other(format!("Failed to fail task: {e}")))?;
 
             tracing::debug!("Failed task {} permanently", task_id);
         }
@@ -368,28 +456,32 @@ impl TaskQueue {
     }
 
     /// Get task queue statistics
+    ///
+    /// # Errors
+    ///
+    /// Returns error if Redis fails.
     pub async fn get_stats(&self) -> Result<TaskQueueStats> {
         let mut conn = self.connection.write().await;
 
         let pending_count: u64 = conn
             .zcard(&self.queue_key)
             .await
-            .map_err(|e| Error::other(format!("Failed to get pending count: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get pending count: {e}")))?;
 
         let in_progress_count: u64 = conn
             .hlen(&self.processing_key)
             .await
-            .map_err(|e| Error::other(format!("Failed to get in-progress count: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get in-progress count: {e}")))?;
 
         let completed_count: u64 = conn
             .hlen(&self.completed_key)
             .await
-            .map_err(|e| Error::other(format!("Failed to get completed count: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get completed count: {e}")))?;
 
         let failed_count: u64 = conn
             .hlen(&self.failed_key)
             .await
-            .map_err(|e| Error::other(format!("Failed to get failed count: {}", e)))?;
+            .map_err(|e| Error::other(format!("Failed to get failed count: {e}")))?;
 
         Ok(TaskQueueStats {
             pending_count,
@@ -402,6 +494,10 @@ impl TaskQueue {
     }
 
     /// Get task by ID from any queue
+    ///
+    /// # Errors
+    ///
+    /// Returns error if deserialization or Redis fails.
     pub async fn get_task(&self, task_id: Uuid) -> Result<Option<Task>> {
         let mut conn = self.connection.write().await;
 
@@ -411,7 +507,7 @@ impl TaskQueue {
             .await
         {
             let task: Task = bincode::deserialize(&task_data)
-                .map_err(|e| Error::serialization(format!("Failed to deserialize task: {}", e)))?;
+                .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
             return Ok(Some(task));
         }
 
@@ -421,7 +517,7 @@ impl TaskQueue {
             .await
         {
             let task: Task = bincode::deserialize(&task_data)
-                .map_err(|e| Error::serialization(format!("Failed to deserialize task: {}", e)))?;
+                .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
             return Ok(Some(task));
         }
 
@@ -431,7 +527,7 @@ impl TaskQueue {
             .await
         {
             let task: Task = bincode::deserialize(&task_data)
-                .map_err(|e| Error::serialization(format!("Failed to deserialize task: {}", e)))?;
+                .map_err(|e| Error::serialization(format!("Failed to deserialize task: {e}")))?;
             return Ok(Some(task));
         }
 
@@ -439,6 +535,11 @@ impl TaskQueue {
     }
 
     /// Shutdown the task queue
+    ///
+    /// # Errors
+    ///
+    /// Returns error if shutdown fails.
+    #[allow(clippy::unused_async)]
     pub async fn shutdown(self) -> Result<()> {
         // Connection will be dropped automatically
         tracing::info!("Task queue shutdown completed");
@@ -510,3 +611,12 @@ mod basic_tests {
         assert!(!task.can_retry());
     }
 }
+
+
+
+
+
+
+
+
+

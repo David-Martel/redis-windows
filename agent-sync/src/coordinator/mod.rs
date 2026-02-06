@@ -3,10 +3,12 @@
 //! This module provides coordination mechanisms for distributed agent systems,
 //! including task queues, shared context management, and notification systems.
 
+pub mod agent_registry;
 pub mod notification_bus;
 pub mod shared_context;
 pub mod task_queue;
 
+pub use agent_registry::{AgentCapabilities, AgentRegistry, RegisteredAgent};
 pub use notification_bus::{
     Notification, NotificationBus, NotificationFilter, NotificationPriority, NotificationStats,
     NotificationType, Subscriber,
@@ -14,6 +16,7 @@ pub use notification_bus::{
 pub use shared_context::{ContextData, ContextResult, ContextScope, SharedContext};
 pub use task_queue::{Task, TaskPriority, TaskQueue, TaskQueueStats, TaskResult, TaskStatus};
 
+use crate::connection::ConnectionPool;
 use crate::Result;
 
 /// Coordinator configuration
@@ -21,6 +24,8 @@ use crate::Result;
 pub struct CoordinatorConfig {
     /// Redis connection string
     pub redis_url: String,
+    /// Redis namespace
+    pub namespace: String,
     /// Maximum number of concurrent tasks
     pub max_concurrent_tasks: usize,
     /// Task timeout in seconds
@@ -33,8 +38,15 @@ pub struct CoordinatorConfig {
 
 impl Default for CoordinatorConfig {
     fn default() -> Self {
+        let redis_url = if cfg!(target_os = "windows") {
+            "redis://localhost:6380".to_string()
+        } else {
+            "redis://localhost:6379".to_string()
+        };
+
         Self {
-            redis_url: "redis://localhost:6379".to_string(),
+            redis_url,
+            namespace: crate::coordinator::task_queue::DEFAULT_NAMESPACE.to_string(),
             max_concurrent_tasks: 100,
             task_timeout_secs: 300,
             enable_metrics: true,
@@ -55,9 +67,42 @@ pub struct Coordinator {
 impl Coordinator {
     /// Create a new coordinator
     pub async fn new(config: CoordinatorConfig) -> Result<Self> {
-        let task_queue = TaskQueue::new(&config.redis_url).await?;
-        let shared_context = SharedContext::new(&config.redis_url).await?;
-        let notification_bus = NotificationBus::new(&config.redis_url).await?;
+        let task_queue =
+            TaskQueue::new_with_namespace(&config.redis_url, &config.namespace).await?;
+        let shared_context =
+            SharedContext::new_with_namespace(&config.redis_url, &config.namespace).await?;
+        let notification_bus =
+            NotificationBus::new_with_namespace(&config.redis_url, &config.namespace).await?;
+
+        Ok(Self {
+            task_queue,
+            shared_context,
+            notification_bus,
+            config,
+        })
+    }
+
+    /// Create a coordinator using connections from a shared pool.
+    pub async fn new_with_pool(config: CoordinatorConfig, pool: &ConnectionPool) -> Result<Self> {
+        let client = pool.client().clone();
+
+        let tq_conn = pool.get_multiplexed().await?;
+        let task_queue = TaskQueue::new_with_namespace_and_connection(
+            client.clone(),
+            tq_conn,
+            &config.namespace,
+        );
+
+        let sc_conn = pool.get_multiplexed().await?;
+        let shared_context = SharedContext::new_with_namespace_and_connection(
+            client.clone(),
+            sc_conn,
+            &config.namespace,
+        );
+
+        let nb_conn = pool.get_multiplexed().await?;
+        let notification_bus =
+            NotificationBus::new_with_namespace_and_connections(client, nb_conn, &config.namespace);
 
         Ok(Self {
             task_queue,
@@ -68,21 +113,22 @@ impl Coordinator {
     }
 
     /// Get task queue reference
-    pub fn task_queue(&self) -> &TaskQueue {
+    pub const fn task_queue(&self) -> &TaskQueue {
         &self.task_queue
     }
 
     /// Get shared context reference
-    pub fn shared_context(&self) -> &SharedContext {
+    pub const fn shared_context(&self) -> &SharedContext {
         &self.shared_context
     }
 
     /// Get notification bus reference
-    pub fn notification_bus(&self) -> &NotificationBus {
+    pub const fn notification_bus(&self) -> &NotificationBus {
         &self.notification_bus
     }
 
     /// Shutdown the coordinator
+    #[allow(clippy::unused_async)]
     pub async fn shutdown(self) -> Result<()> {
         // Shutdown in reverse order
         self.notification_bus.shutdown().await?;
@@ -99,10 +145,24 @@ mod tests {
     #[tokio::test]
     async fn test_coordinator_config_default() {
         let config = CoordinatorConfig::default();
-        assert_eq!(config.redis_url, "redis://localhost:6379");
+        let expected_url = if cfg!(target_os = "windows") {
+            "redis://localhost:6380"
+        } else {
+            "redis://localhost:6379"
+        };
+        assert_eq!(config.redis_url, expected_url);
+        assert_eq!(
+            config.namespace,
+            crate::coordinator::task_queue::DEFAULT_NAMESPACE
+        );
         assert_eq!(config.max_concurrent_tasks, 100);
         assert_eq!(config.task_timeout_secs, 300);
         assert!(config.enable_metrics);
         assert_eq!(config.notification_buffer_size, 1000);
     }
 }
+
+
+
+
+

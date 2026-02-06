@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Testing utilities and mocks for agent-sync
 //!
 //! This module provides utilities for testing the agent-sync library,
@@ -8,15 +9,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mockall::mock;
-use redis::{AsyncCommands, Client};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::coordinator::{
     ContextData, ContextResult, ContextScope, Notification, NotificationFilter,
-    NotificationPriority, NotificationType, Task, TaskPriority, TaskResult, TaskStatus,
+    Task, TaskResult,
 };
-use crate::{AgentId, Error, Result, SessionId};
+use crate::{AgentId, Error, Result};
 
 pub mod fixtures;
 pub mod helpers;
@@ -27,58 +27,58 @@ pub use fixtures::*;
 pub use helpers::*;
 pub use redis_mock::*;
 
-/// Mock task queue for testing
 mock! {
     pub TaskQueue {
-        async fn enqueue(&self, task: Task) -> Result<()>;
-        async fn dequeue(&self, agent_id: AgentId) -> Result<Option<Task>>;
-        async fn complete_task(&self, task_id: Uuid, result: TaskResult) -> Result<()>;
-        async fn fail_task(&self, task_id: Uuid, error: String) -> Result<()>;
-        async fn get_task(&self, task_id: Uuid) -> Result<Option<Task>>;
-        async fn get_stats(&self) -> Result<crate::coordinator::TaskQueueStats>;
-        async fn shutdown(self) -> Result<()>;
+        pub async fn enqueue(&self, task: Task) -> Result<()>;
+        pub async fn dequeue(&self, agent_id: AgentId) -> Result<Option<Task>>;
+        pub async fn complete_task(&self, task_id: Uuid, result: TaskResult) -> Result<()>;
+        pub async fn fail_task(&self, task_id: Uuid, error: String) -> Result<()>;
+        pub async fn get_task(&self, task_id: Uuid) -> Result<Option<Task>>;
+        pub async fn get_stats(&self) -> Result<crate::coordinator::TaskQueueStats>;
+        #[allow(clippy::unused_async)]
+    pub async fn shutdown(self) -> Result<()>;
     }
 }
 
-/// Mock shared context for testing
 mock! {
     pub SharedContext {
-        async fn set(&self, scope: ContextScope, key: &str, data: ContextData) -> Result<ContextResult>;
-        async fn get(&self, scope: ContextScope, key: &str) -> Result<Option<ContextData>>;
-        async fn update(&self, scope: ContextScope, key: &str, data: ContextData, expected_revision: u64) -> Result<ContextResult>;
-        async fn delete(&self, scope: ContextScope, key: &str) -> Result<bool>;
-        async fn exists(&self, scope: ContextScope, key: &str) -> Result<bool>;
-        async fn list_keys(&self, scope: ContextScope, pattern: &str) -> Result<Vec<String>>;
-        async fn set_ttl(&self, scope: ContextScope, key: &str, ttl: Duration) -> Result<bool>;
-        async fn get_ttl(&self, scope: ContextScope, key: &str) -> Result<Option<Duration>>;
-        async fn increment(&self, scope: ContextScope, key: &str, amount: i64) -> Result<i64>;
-        async fn clear_scope(&self, scope: ContextScope) -> Result<u32>;
-        async fn shutdown(self) -> Result<()>;
+        pub async fn set(&self, scope: ContextScope, key: &str, data: ContextData) -> Result<ContextResult>;
+        pub async fn get(&self, scope: ContextScope, key: &str) -> Result<Option<ContextData>>;
+        pub async fn update(&self, scope: ContextScope, key: &str, data: ContextData, expected_revision: u64) -> Result<ContextResult>;
+        pub async fn delete(&self, scope: ContextScope, key: &str) -> Result<bool>;
+        pub async fn exists(&self, scope: ContextScope, key: &str) -> Result<bool>;
+        pub async fn list_keys(&self, scope: ContextScope, pattern: &str) -> Result<Vec<String>>;
+        pub async fn set_ttl(&self, scope: ContextScope, key: &str, ttl: Duration) -> Result<bool>;
+        pub async fn get_ttl(&self, scope: ContextScope, key: &str) -> Result<Option<Duration>>;
+        pub async fn increment(&self, scope: ContextScope, key: &str, amount: i64) -> Result<i64>;
+        pub async fn clear_scope(&self, scope: ContextScope) -> Result<u32>;
+        #[allow(clippy::unused_async)]
+    pub async fn shutdown(self) -> Result<()>;
     }
 }
 
-/// Mock notification bus for testing
 mock! {
     pub NotificationBus {
-        async fn publish(&self, notification: Notification) -> Result<u64>;
-        async fn subscribe(&self, agent_id: AgentId, filter: NotificationFilter) -> Result<(Uuid, mpsc::UnboundedReceiver<Notification>)>;
-        async fn unsubscribe(&self, subscription_id: Uuid) -> Result<bool>;
-        async fn broadcast_system(&self, component: &str, level: &str, message: &str, sender: AgentId) -> Result<u64>;
-        async fn get_stats(&self) -> crate::coordinator::NotificationStats;
-        async fn list_subscriptions(&self) -> Vec<(Uuid, AgentId)>;
-        async fn cleanup(&self) -> Result<(u32, u32)>;
-        async fn shutdown(self) -> Result<()>;
+        pub async fn publish(&self, notification: Notification) -> Result<u64>;
+        pub async fn subscribe(&self, agent_id: AgentId, filter: NotificationFilter) -> Result<(Uuid, mpsc::UnboundedReceiver<Notification>)>;
+        pub async fn unsubscribe(&self, subscription_id: Uuid) -> Result<bool>;
+        pub async fn broadcast_system(&self, component: &str, level: &str, message: &str, sender: AgentId) -> Result<u64>;
+        pub async fn get_stats(&self) -> crate::coordinator::NotificationStats;
+        pub async fn list_subscriptions(&self) -> Vec<(Uuid, AgentId)>;
+        pub async fn cleanup(&self) -> Result<(u32, u32)>;
+        #[allow(clippy::unused_async)]
+    pub async fn shutdown(self) -> Result<()>;
     }
 }
 
-/// Mock coordinator for testing
 mock! {
     pub Coordinator {
-        async fn new(config: crate::coordinator::CoordinatorConfig) -> Result<Self>;
-        fn task_queue(&self) -> &MockTaskQueue;
-        fn shared_context(&self) -> &MockSharedContext;
-        fn notification_bus(&self) -> &MockNotificationBus;
-        async fn shutdown(self) -> Result<()>;
+        pub async fn new(config: crate::coordinator::CoordinatorConfig) -> Result<Self>;
+        pub fn task_queue(&self) -> &MockTaskQueue;
+        pub fn shared_context(&self) -> &MockSharedContext;
+        pub fn notification_bus(&self) -> &MockNotificationBus;
+        #[allow(clippy::unused_async)]
+    pub async fn shutdown(self) -> Result<()>;
     }
 }
 
@@ -178,7 +178,7 @@ impl MemoryStore {
         let mut data = self.data.lock().unwrap();
 
         // Simple glob-like pattern matching
-        let regex_pattern = pattern.replace("*", ".*");
+        let regex_pattern = pattern.replace('*', ".*");
         let regex = regex::Regex::new(&regex_pattern).unwrap();
 
         let mut keys = Vec::new();
@@ -205,16 +205,16 @@ impl MemoryStore {
         let mut data = self.data.lock().unwrap();
 
         if let Some(entry) = data.get_mut(key) {
-            if !entry.is_expired() {
+            if entry.is_expired() {
+                data.remove(key);
+                false
+            } else {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
                 entry.expires_at = Some(now + ttl_secs);
                 true
-            } else {
-                data.remove(key);
-                false
             }
         } else {
             false
@@ -295,7 +295,7 @@ impl MemoryStore {
 
         pub_sub
             .entry(channel.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(sender);
 
         receiver
@@ -319,7 +319,7 @@ impl MemoryStore {
         let expired_keys = data.values().filter(|entry| entry.is_expired()).count();
         let active_keys = total_keys - expired_keys;
         let channels = pub_sub.len();
-        let total_subscribers = pub_sub.values().map(|subs| subs.len()).sum();
+        let total_subscribers = pub_sub.values().map(std::vec::Vec::len).sum();
 
         MemoryStoreStats {
             total_keys,
@@ -350,9 +350,15 @@ pub struct TestRedisServer {
 impl TestRedisServer {
     /// Create a new test Redis server
     pub fn new() -> Self {
+        let server_url = if cfg!(target_os = "windows") {
+            "redis://localhost:6380".to_string()
+        } else {
+            "redis://localhost:6379".to_string()
+        };
+
         Self {
             store: MemoryStore::new(),
-            server_url: "redis://localhost:6379".to_string(),
+            server_url,
         }
     }
 
@@ -362,7 +368,7 @@ impl TestRedisServer {
     }
 
     /// Get access to the underlying memory store
-    pub fn store(&self) -> &MemoryStore {
+    pub const fn store(&self) -> &MemoryStore {
         &self.store
     }
 
@@ -390,7 +396,7 @@ pub struct MockRedisConnection {
 
 impl MockRedisConnection {
     /// Create a new mock connection
-    pub fn new(store: Arc<MemoryStore>) -> Self {
+    pub const fn new(store: Arc<MemoryStore>) -> Self {
         Self { store }
     }
 
@@ -406,41 +412,39 @@ impl MockRedisConnection {
                 }
             }
             "GET" => {
-                if args.len() >= 1 {
-                    if let Some(value) = self.store.get(args[0]) {
-                        Ok(String::from_utf8_lossy(&value).to_string())
-                    } else {
-                        Ok("(nil)".to_string())
-                    }
-                } else {
+                if args.is_empty() {
                     Err(Error::other("GET requires key".to_string()))
+                } else if let Some(value) = self.store.get(args[0]) {
+                    Ok(String::from_utf8_lossy(&value).to_string())
+                } else {
+                    Ok("(nil)".to_string())
                 }
             }
             "DEL" => {
-                if args.len() >= 1 {
+                if args.is_empty() {
+                    Err(Error::other("DEL requires key".to_string()))
+                } else {
                     let deleted = self.store.delete(args[0]);
                     Ok(if deleted { "1" } else { "0" }.to_string())
-                } else {
-                    Err(Error::other("DEL requires key".to_string()))
                 }
             }
             "EXISTS" => {
-                if args.len() >= 1 {
+                if args.is_empty() {
+                    Err(Error::other("EXISTS requires key".to_string()))
+                } else {
                     let exists = self.store.exists(args[0]);
                     Ok(if exists { "1" } else { "0" }.to_string())
-                } else {
-                    Err(Error::other("EXISTS requires key".to_string()))
                 }
             }
             "KEYS" => {
-                if args.len() >= 1 {
-                    let keys = self.store.keys(args[0]);
-                    Ok(format!("{:?}", keys))
-                } else {
+                if args.is_empty() {
                     Err(Error::other("KEYS requires pattern".to_string()))
+                } else {
+                    let keys = self.store.keys(args[0]);
+                    Ok(format!("{keys:?}"))
                 }
             }
-            _ => Err(Error::other(format!("Unsupported command: {}", cmd))),
+            _ => Err(Error::other(format!("Unsupported command: {cmd}"))),
         }
     }
 }
@@ -449,7 +453,7 @@ impl MockRedisConnection {
 impl Error {
     /// Create a test error
     pub fn test<S: Into<String>>(message: S) -> Self {
-        Error::other(message.into())
+        Self::other(message.into())
     }
 }
 
@@ -457,7 +461,6 @@ impl Error {
 mod tests {
     use super::*;
     use std::time::Duration;
-    use tokio::time::sleep;
 
     #[test]
     fn test_memory_store_basic_operations() {
@@ -579,3 +582,8 @@ mod tests {
         assert_eq!(stats.expired_keys, 0);
     }
 }
+
+
+
+
+

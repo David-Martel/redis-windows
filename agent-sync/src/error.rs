@@ -1,5 +1,6 @@
 //! Error types for agent-sync
 
+use std::time::Duration;
 use thiserror::Error as ThiserrorError;
 
 /// The main result type used throughout the agent-sync library
@@ -14,6 +15,9 @@ pub enum Error {
     /// Connection error
     #[error("Connection error: {0}")]
     Connection(String),
+    /// Connection pool error
+    #[error("Pool error: {0}")]
+    Pool(String),
     /// Serialization error
     #[error("Serialization error: {0}")]
     Serialization(String),
@@ -23,6 +27,15 @@ pub enum Error {
     /// Configuration error
     #[error("Configuration error: {0}")]
     Config(String),
+    /// Timeout error
+    #[error("Operation timed out after {0:?}")]
+    Timeout(Duration),
+    /// Agent not found
+    #[error("Agent not found: {0}")]
+    AgentNotFound(String),
+    /// Agent already registered
+    #[error("Agent already registered: {0}")]
+    AgentAlreadyRegistered(String),
     /// Other error
     #[error("Error: {0}")]
     Other(String),
@@ -55,3 +68,11 @@ impl From<redis::RedisError> for Error {
         Self::Redis(err)
     }
 }
+
+impl From<bb8::RunError<bb8_redis::redis::RedisError>> for Error {
+    fn from(err: bb8::RunError<bb8_redis::redis::RedisError>) -> Self {
+        Self::Pool(err.to_string())
+    }
+}
+
+
