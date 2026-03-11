@@ -20,7 +20,6 @@ tokio-runtime = ["tokio", "tokio-util"]
 async-std-runtime = ["async-std", "async-trait"]
 serde-support = ["serde", "serde_json", "bincode", "rmp-serde"]
 metrics = ["prometheus"]
-tls = ["tokio-native-tls", "native-tls"]
 cluster = ["crc16"]
 test-utilities = ["mockall", "rand"]
 proptest = ["proptest-derive"]
@@ -72,10 +71,6 @@ dunce = "1.0"
 # Configuration
 config = "0.14"
 
-# TLS support
-tokio-native-tls = { version = "0.3", optional = true }
-native-tls = { version = "0.2", optional = true }
-
 # Clustering
 crc16 = { version = "0.4", optional = true }
 
@@ -124,13 +119,14 @@ debug = false
 opt-level = 1
 debug = 2
 split-debuginfo = "packed"
+incremental = false  # Required for sccache
 
 # Fast development builds
 [profile.dev-fast]
 inherits = "dev"
 opt-level = 0
 debug = 1
-incremental = true
+incremental = false  # Required for sccache
 codegen-units = 256
 
 # Optimized development builds
@@ -173,7 +169,3 @@ windows = { version = "0.58", features = [
     "Win32_Security",
 ] }
 
-# Unix-specific dependencies (including WSL)
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-nix = "0.27"

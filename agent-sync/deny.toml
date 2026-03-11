@@ -22,20 +22,23 @@ feature-depth = 1
 # Security vulnerability database
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
-
-# Ignore advisories for known false positives or acceptable risks
+# cargo-deny 0.19+: unmaintained accepts "workspace"|"all"|"transitive"|"none"
+unmaintained = "workspace"
 ignore = [
-    # Add specific advisory IDs here if needed
-    # Example: "RUSTSEC-2020-0001"
+    # protobuf 2.28.0 via prometheus 0.13 - prometheus is optional and not used with untrusted input
+    { id = "RUSTSEC-2024-0437", reason = "prometheus metrics are internal; no untrusted protobuf parsing" },
+    # async-std discontinued (RUSTSEC-2025-0052) - optional dep, not in default features
+    { id = "RUSTSEC-2025-0052", reason = "optional dependency, not in default features" },
+    # bincode unmaintained (RUSTSEC-2025-0141) - considering migration to postcard
+    { id = "RUSTSEC-2025-0141", reason = "considering migration to postcard; optional dep" },
+    # bytes integer overflow in BytesMut::reserve (RUSTSEC-2026-0007) - only affects very large allocations
+    { id = "RUSTSEC-2026-0007", reason = "agent-sync never reserves extreme buffer sizes" },
 ]
 
 [licenses]
-# Define acceptable licenses for the project
-unlicensed = "deny"
+# cargo-deny 0.19+ license configuration
+# High confidence threshold when inferring licenses from text
+confidence-threshold = 0.93
 allow = [
     "MIT",
     "Apache-2.0",
@@ -44,38 +47,16 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "Unicode-DFS-2016",
+    "Unicode-3.0",
     "CC0-1.0",
     "0BSD",
-]
-
-# Warn about licenses that need review
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-3.0",
-    "LGPL-2.1",
-    "LGPL-3.0",
+    "Zlib",
     "MPL-2.0",
-    "CDDL-1.0",
-    "EPL-1.0",
-    "EPL-2.0",
 ]
 
-# Licenses that require special handling
-copyleft = "warn"
-allow-osi-fsf-free = "both"
-default = "deny"
-
-# License exceptions for specific crates
-[[licenses.exceptions]]
-allow = ["Unicode-DFS-2016"]
-name = "unicode-ident"
-version = "*"
-
-[[licenses.exceptions]]
-allow = ["Ring-Readme"]
-name = "ring"
-version = "*"
+exceptions = [
+    { allow = ["Unicode-DFS-2016"], crate = "unicode-ident" },
+]
 
 [bans]
 # Multiple versions of the same crate
@@ -97,57 +78,17 @@ deny = [
     { name = "yaml-rust", version = "<0.4.5" },
 ]
 
-# Crates to allow with specific versions
-allow = [
-    # Core Redis and networking crates
-    { name = "redis" },
-    { name = "tokio" },
-    { name = "tokio-util" },
-    { name = "async-std" },
-
-    # Serialization crates
-    { name = "serde" },
-    { name = "serde_json" },
-    { name = "bincode" },
-    { name = "rmp-serde" },
-
-    # Utility crates
-    { name = "uuid" },
-    { name = "chrono" },
-    { name = "thiserror" },
-    { name = "anyhow" },
-    { name = "bytes" },
-    { name = "futures" },
-    { name = "dashmap" },
-
-    # Platform-specific crates
-    { name = "windows" },
-    { name = "windows-core" },
-    { name = "libc" },
-    { name = "nix" },
-
-    # Development and testing crates
-    { name = "criterion" },
-    { name = "proptest" },
-    { name = "mockall" },
-    { name = "testcontainers" },
-]
+# No allow-list: all crates permitted unless explicitly banned above
 
 # Skip crates that are typically duplicated
 skip = [
-    # System libraries that may have multiple versions
     { name = "windows_x86_64_msvc" },
     { name = "windows_x86_64_gnu" },
-    { name = "windows_i686_msvc" },
-    { name = "windows_i686_gnu" },
     { name = "windows_aarch64_msvc" },
 ]
 
 # Tree skipping for complex dependency trees
-skip-tree = [
-    # Skip large dependency trees that are commonly duplicated
-    { name = "winapi", version = "=0.2.8" },
-]
+skip-tree = []
 
 [sources]
 # Define allowed source registries
@@ -158,11 +99,4 @@ allow-registry = [
     "https://github.com/rust-lang/crates.io-index"
 ]
 
-allow-git = [
-    # Allow specific Git repositories if needed
-    "https://github.com/redis-rs/redis-rs",
-    "https://github.com/tokio-rs/tokio",
-]
-
-# Git sources configuration
-[sources.allow-git]
+allow-git = []

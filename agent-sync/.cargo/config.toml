@@ -1,11 +1,16 @@
 # Cross-compilation configuration for agent-sync
 # Supports Windows MSVC, Linux GNU, and WSL targets
+#
+# NOTE: Profile definitions ([profile.*]) belong in Cargo.toml, not here.
+# This file handles build toolchain, environment, targets, and aliases only.
 
 [build]
 # Default target for Windows development
 target = "x86_64-pc-windows-msvc"
+# Route all rustc invocations through sccache for shared compilation caching
+rustc-wrapper = "sccache"
 
-# Cargo configuration for cross-compilation
+# Cross-compilation target rustflags
 [target.x86_64-pc-windows-msvc]
 rustflags = [
     "-C", "target-cpu=native",
@@ -24,26 +29,18 @@ rustflags = [
     "-C", "link-arg=-static",
 ]
 
-# Additional targets for broader compatibility
 [target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "link-arg=/SUBSYSTEM:CONSOLE"]
 
 [target.aarch64-unknown-linux-gnu]
 rustflags = ["-C", "link-arg=-fuse-ld=gold"]
 
-# Environment configuration
+# Environment variables
 [env]
-# Enable colored output
+# sccache requires incremental compilation to be disabled
+CARGO_INCREMENTAL = "0"
+# Colored terminal output
 CARGO_TERM_COLOR = "always"
-
-# Performance optimizations
-CARGO_PROFILE_RELEASE_LTO = "fat"
-CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1"
-CARGO_PROFILE_RELEASE_PANIC = "abort"
-
-# Development optimizations
-CARGO_PROFILE_DEV_OPT_LEVEL = "1"
-CARGO_PROFILE_DEV_DEBUG = "2"
 
 # Registry configuration
 [registry]
@@ -52,78 +49,12 @@ default = "crates-io"
 [registry.crates-io]
 protocol = "sparse"
 
-# Source configuration
-# Uncomment below for offline builds with vendored dependencies
-# [source.crates-io]
-# replace-with = "vendored-sources"
-#
-# [source.vendored-sources]
-# directory = "vendor"
-
 # Network configuration
 [net]
 retry = 2
 git-fetch-with-cli = true
 offline = false
 
-# Build cache configuration
-[build-cache]
-incremental = true
-
-# Profile configurations for different build scenarios
-[profile.dev]
-opt-level = 1
-debug = 2
-debug-assertions = true
-overflow-checks = true
-lto = false
-panic = "unwind"
-incremental = true
-codegen-units = 256
-rpath = false
-
-[profile.release]
-opt-level = 3
-debug = false
-debug-assertions = false
-overflow-checks = false
-lto = "fat"
-panic = "abort"
-incremental = false
-codegen-units = 1
-rpath = false
-
-[profile.test]
-opt-level = 1
-debug = 2
-debug-assertions = true
-overflow-checks = true
-lto = false
-panic = "unwind"
-incremental = true
-codegen-units = 256
-
-[profile.bench]
-opt-level = 3
-debug = false
-debug-assertions = false
-overflow-checks = false
-lto = "fat"
-panic = "abort"
-incremental = false
-codegen-units = 1
-
-# Development profile for faster builds
-[profile.dev-fast]
-inherits = "dev"
-opt-level = 1
-debug = 1
-incremental = true
-codegen-units = 256
-
-# CI profile optimized for CI environments
-[profile.ci]
-inherits = "release"
-debug = true
-lto = "thin"
-codegen-units = 4
+# Cargo command aliases
+[alias]
+tn = "nextest run"
