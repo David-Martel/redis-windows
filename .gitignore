@@ -48,7 +48,10 @@ logs/
 
 # Runtime files
 *.pid
-*.lock
+redis.lock
+
+# Cargo.lock is tracked for reproducible service binary builds
+!agent-sync/Cargo.lock
 
 # Redis download/extract artifacts
 Redis-*.zip
