@@ -7,7 +7,9 @@ param(
     [switch]$Test,
     [switch]$Clean,
     [switch]$Verbose,
-    [switch]$Service
+    [switch]$Service,
+    [switch]$Clippy,
+    [switch]$Deny
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,12 +24,15 @@ function Write-Success {
     Write-Host "Success: $Message" -ForegroundColor Green
 }
 
-# Check for CargoTools module
-$cargoToolsPath = "C:\Users\david\wezterm\tools\CargoTools\CargoTools.psm1"
-$hasCargoTools = Test-Path $cargoToolsPath
+# Load CargoTools from standard module path (auto-discovered by PowerShell)
+Import-Module CargoTools -ErrorAction SilentlyContinue
+$hasCargoTools = $null -ne (Get-Module CargoTools)
 if ($hasCargoTools) {
-    Import-Module $cargoToolsPath -Force
-    Initialize-CargoEnv
+    $toolchainInfo = Get-CargoEnvironment
+    if (-not (Test-RustToolchain)) {
+        Write-Host "Error: Rust toolchain validation failed" -ForegroundColor Red
+        exit 1
+    }
     Write-Step "Using CargoTools for build orchestration (sccache enabled)"
 }
 
@@ -41,11 +46,47 @@ try {
     exit 1
 }
 
+# sccache health check
+$sccacheOk = $false
+try {
+    $null = & sccache --show-stats 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $sccacheOk = $true
+        Write-Verbose "sccache is available and responding"
+    }
+} catch {
+    Write-Verbose "sccache not available; building without cache acceleration"
+}
+
 # Clean if requested
 if ($Clean) {
     Write-Step "Cleaning build artifacts"
     if (Test-Path "target") { Remove-Item -Recurse -Force "target" }
     & cargo clean
+}
+
+# cargo deny check if requested
+if ($Deny) {
+    Write-Step "Running cargo deny check"
+    & cargo deny check
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "cargo deny check failed" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+    Write-Success "cargo deny check passed"
+}
+
+# Clippy if requested
+if ($Clippy) {
+    Write-Step "Running clippy"
+    $clippyArgs = @("clippy", "--target", $Target, "--", "-D", "warnings")
+    if ($Verbose) { $clippyArgs += "--verbose" }
+    & cargo @clippyArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Clippy check failed" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+    Write-Success "Clippy passed"
 }
 
 # Build library
@@ -55,7 +96,10 @@ if ($Release) { $buildArgs += "--release" }
 if ($Verbose) { $buildArgs += "--verbose" }
 
 if ($hasCargoTools) {
-    Invoke-CargoWrapper build --target $Target
+    $additionalArgs = @("--target", $Target)
+    if ($Release) { $additionalArgs += "--release" }
+    if ($Verbose) { $additionalArgs += "--verbose" }
+    Invoke-CargoWrapper -Command build -AdditionalArgs $additionalArgs
 } else {
     & cargo @buildArgs
 }
@@ -74,9 +118,10 @@ if ($Service) {
     if ($Verbose) { $serviceArgs += "--verbose" }
 
     if ($hasCargoTools) {
-        $cargoArgs = @("--bin", "redis-service", "--features", "service", "--target", $Target)
-        if ($Release) { $cargoArgs += "--release" }
-        Invoke-CargoWrapper build @cargoArgs
+        $additionalArgs = @("--bin", "redis-service", "--features", "service", "--target", $Target)
+        if ($Release) { $additionalArgs += "--release" }
+        if ($Verbose) { $additionalArgs += "--verbose" }
+        Invoke-CargoWrapper -Command build -AdditionalArgs $additionalArgs
     } else {
         & cargo @serviceArgs
     }
@@ -100,13 +145,32 @@ if ($Test) {
     $testArgs = @("test", "--target", $Target)
     if ($Release) { $testArgs += "--release" }
 
-    if ($hasCargoTools) {
-        Invoke-CargoWrapper test --target $Target
+    # Prefer cargo-nextest when available
+    $hasNextest = $null -ne (Get-Command "cargo-nextest" -ErrorAction SilentlyContinue)
+    if (-not $hasNextest) {
+        # Also check via cargo subcommand discovery
+        $nextestCheck = & cargo nextest --version 2>&1
+        $hasNextest = $LASTEXITCODE -eq 0
+    }
+
+    if ($hasNextest) {
+        Write-Verbose "Using cargo-nextest for test execution"
+        $nextestArgs = @("nextest", "run", "--target", $Target)
+        if ($Release) { $nextestArgs += "--release" }
+        & cargo @nextestArgs
+    } elseif ($hasCargoTools) {
+        $additionalArgs = @("--target", $Target)
+        if ($Release) { $additionalArgs += "--release" }
+        Invoke-CargoWrapper -Command test -AdditionalArgs $additionalArgs
     } else {
         & cargo @testArgs
     }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Tests failed" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+    Write-Success "All tests passed"
 }
 
 Write-Success "Build completed successfully"
-
-
