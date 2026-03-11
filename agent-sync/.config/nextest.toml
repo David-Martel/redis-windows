@@ -1,4 +1,4 @@
-# cargo-nextest configuration for high-performance test execution
+# cargo-nextest configuration for agent-sync test execution
 # https://nexte.st/book/configuration
 
 [store]
@@ -7,24 +7,32 @@ dir = "target/nextest"
 
 [profile.default]
 # Default test profile configuration
-retries = { backoff = "exponential", count = 2, delay = "1s" }
-test-threads = "num-cpus"
+# 4 fixed threads avoids over-subscription on CI runners and Windows dev machines
+test-threads = 4
 threads-required = 1
-slow-timeout = { period = "60s", terminate-after = 2 }
+# 2 retries with exponential back-off catches transient Redis connection flakiness
+retries = { backoff = "exponential", count = 2, delay = "1s" }
+# Warn after 10 s; terminate a test that runs 6× longer (60 s)
+slow-timeout = { period = "10s", terminate-after = 6 }
 leak-timeout = "10s"
 success-output = "immediate"
 failure-output = "immediate"
 fail-fast = false
 
 [profile.ci]
-# CI-specific profile - fail fast, no retries
-retries = 0
+# CI profile: inherits all default settings, then tightens failure behaviour.
+# - fail-fast so the build log stays short on the first breakage
+# - 1 retry covers legitimate transient Redis timeouts without masking real bugs
+# - JUnit XML report consumed by GitHub Actions test-results step
+inherits = "default"
 fail-fast = true
-slow-timeout = { period = "120s", terminate-after = 1 }
-test-threads = 4
+retries = 1
+
+[profile.ci.junit]
+path = "junit.xml"
 
 [profile.dev]
-# Development profile - quick feedback
+# Development profile: quick feedback loop, no retries, keep going on failures
 test-threads = "num-cpus"
 retries = 0
 fail-fast = false
@@ -32,31 +40,38 @@ success-output = "never"
 failure-output = "immediate"
 
 [profile.stress]
-# Stress testing profile - many iterations
+# Stress testing: maximum parallelism, many retries, long timeouts
 test-threads = "num-cpus"
 retries = 5
-slow-timeout = { period = "300s", terminate-after = 3 }
+slow-timeout = { period = "60s", terminate-after = 5 }
 
 [profile.quick]
-# Quick test run - parallel execution, fail fast
+# Quick smoke run: parallel, fail fast, minimal output
 test-threads = "num-cpus"
 fail-fast = true
 retries = 0
 success-output = "never"
 failure-output = "final"
 
-# Test groups configuration
+# ---------------------------------------------------------------------------
+# Per-test overrides (applied to the default profile and all that inherit it)
+# ---------------------------------------------------------------------------
+
+# Integration tests that exercise real Redis connections run serially to avoid
+# port/keyspace collisions and to keep memory pressure predictable.
 [[profile.default.overrides]]
 filter = "test(integration)"
-test-threads = 2
-slow-timeout = { period = "180s" }
-
-[[profile.default.overrides]]
-filter = "test(benchmark)"
 test-threads = 1
-slow-timeout = { period = "300s" }
+slow-timeout = { period = "30s", terminate-after = 6 }
 
+# Tests that explicitly name "redis" in their function name also run serially
+# for the same reason; these are the stub-detection and connection tests.
 [[profile.default.overrides]]
 filter = "test(redis)"
 test-threads = 1
-serial-test = true
+
+# Benchmark helpers that happen to be collected as tests are allowed more time
+[[profile.default.overrides]]
+filter = "test(benchmark)"
+test-threads = 1
+slow-timeout = { period = "60s", terminate-after = 5 }
