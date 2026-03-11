@@ -57,14 +57,14 @@ jobs:
           $releaseInfo = ConvertFrom-Json(Invoke-WebRequest -Headers @{'Authorization' = 'Bearer ${{ secrets.GITHUB_TOKEN }}'} -Uri "https://api.github.com/repos/redis/redis/releases/tags/$version").Content
           $releaseInfo.body -Replace '\#1', 'https://github.com/redis/redis/pull/1' | Set-Content .\redis_latest_body.txt
 
-      - name: Setup dotnet
+      - name: Setup .NET 10.0
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: '10.0.x'
 
       - name: Publish RedisService.exe
         run: |
-          dotnet publish -c Release -r win-x64 --sc -o publish -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          dotnet publish -c Release -r win-x64 --sc -o publish
 
       - name: Prepare Agent Configurations
         if: ${{ inputs.agent_optimized == 'true' || inputs.agent_optimized == true }}
@@ -147,9 +147,9 @@ jobs:
           sed -i 's/pidfile \/var\/run/pidfile ./' ${{ env.REDIS_DIST }}-msys2/redis.conf
           zip -q -r ${{ env.REDIS_DIST }}-msys2.zip ${{ env.REDIS_DIST }}-msys2
 
-          # Create service package
+          # Create service package (with RedisService.exe)
           cp -r ${{ env.REDIS_DIST }}-msys2 ${{ env.REDIS_DIST }}-msys2-with-Service
-          cp install_redis_service.bat uninstall_redis_service.bat publish/* ${{ env.REDIS_DIST }}-msys2-with-Service/
+          cp publish/* ${{ env.REDIS_DIST }}-msys2-with-Service/
           zip -q -r ${{ env.REDIS_DIST }}-msys2-with-Service.zip ${{ env.REDIS_DIST }}-msys2-with-Service
         shell: msys2 {0}
 
@@ -157,7 +157,7 @@ jobs:
         run: |
           $REDIS_MSYS2_VERSION_INFO=(./${{ env.REDIS_DIST }}-msys2-with-Service/redis-server.exe --version )
           echo $REDIS_MSYS2_VERSION_INFO
-          If ( -not ( $REDIS_MSYS2_VERSION_INFO -match "${{ env.RELEASE_VERSION }}" ) ) { 
+          If ( -not ( $REDIS_MSYS2_VERSION_INFO -match "${{ env.RELEASE_VERSION }}" ) ) {
             Write-Output "MSYS2 verification failed. Expected: ${{ env.RELEASE_VERSION }}, Got: $REDIS_MSYS2_VERSION_INFO"
             exit 1
           }
@@ -244,7 +244,7 @@ jobs:
           sed -i 's/pidfile \/var\/run/pidfile ./' ${{ env.REDIS_DIST }}-cygwin/redis.conf ;
           zip -q -r ${{ env.REDIS_DIST }}-cygwin.zip ${{ env.REDIS_DIST }}-cygwin ;
           cp -r ${{ env.REDIS_DIST }}-cygwin ${{ env.REDIS_DIST }}-cygwin-with-Service ;
-          cp install_redis_service.bat uninstall_redis_service.bat publish/* ${{ env.REDIS_DIST }}-cygwin-with-Service/ ;
+          cp publish/* ${{ env.REDIS_DIST }}-cygwin-with-Service/ ;
           zip -q -r ${{ env.REDIS_DIST }}-cygwin-with-Service.zip ${{ env.REDIS_DIST }}-cygwin-with-Service
         shell: bash
 
@@ -252,7 +252,7 @@ jobs:
         run: |
           $REDIS_CYGWIN_VERSION_INFO=(./${{ env.REDIS_DIST }}-cygwin-with-Service/redis-server.exe --version )
           echo $REDIS_CYGWIN_VERSION_INFO
-          If ( -not ( $REDIS_CYGWIN_VERSION_INFO -match "${{ env.RELEASE_VERSION }}" ) ) { 
+          If ( -not ( $REDIS_CYGWIN_VERSION_INFO -match "${{ env.RELEASE_VERSION }}" ) ) {
             Write-Output "Cygwin verification failed. Expected: ${{ env.RELEASE_VERSION }}, Got: $REDIS_CYGWIN_VERSION_INFO"
             exit 1
           }
@@ -324,7 +324,7 @@ jobs:
           name: Redis ${{ env.RELEASE_VERSION }} for Windows
           tag_name: ${{ env.RELEASE_VERSION }}
           body_path: release_body.txt
-          make_latest: ${{ inputs.make_latest }}
+          make_latest: "${{ inputs.make_latest }}"
           prerelease: ${{ inputs.prerelease }}
           files: |
             redis-cygwin-builds/${{ env.REDIS_DIST }}-cygwin.zip

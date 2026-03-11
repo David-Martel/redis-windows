@@ -1,258 +1,310 @@
-using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using RedisService.CommandLine;
+using RedisService.Native;
+using RedisService.Service;
 
-namespace RedisService
+namespace RedisService;
+
+class Program
 {
-    class Program
+    static async Task<int> Main(string[] args)
     {
-        static void Main(string[] args)
+        try
         {
-            string configFilePath = "redis.conf";
+            var result = CommandLineParser.Parse(args);
 
-            // Parse command line arguments
-            for (int i = 0; i < args.Length; i++)
+            return result switch
             {
-                if (args[i] == "-c" && i + 1 < args.Length)
-                {
-                    configFilePath = args[i + 1];
-                    break;
-                }
-            }
-
-            try
-            {
-                IHost host = Host.CreateDefaultBuilder(args)
-                    .UseWindowsService(options =>
-                    {
-                        options.ServiceName = "Redis Server";
-                    })
-                    .ConfigureLogging(logging =>
-                    {
-                        if (OperatingSystem.IsWindows())
-                        {
-                            logging.AddEventLog();
-                        }
-                        logging.SetMinimumLevel(LogLevel.Information);
-                    })
-                    .ConfigureServices((hostContext, services) =>
-                    {
-                        services.AddHostedService(serviceProvider =>
-                            new RedisService(configFilePath, serviceProvider.GetRequiredService<ILogger<RedisService>>()));
-                    })
-                    .Build();
-
-                host.Run();
-            }
-            catch (Exception ex)
-            {
-                // Log to Windows Event Log if possible
-                try
-                {
-                    if (OperatingSystem.IsWindows())
-                    {
-                        EventLog.WriteEntry("Redis Service", $"Failed to start Redis service: {ex.Message}", EventLogEntryType.Error);
-                    }
-                }
-                catch
-                {
-                    // If event log fails, write to console
-                    Console.WriteLine($"Failed to start Redis service: {ex.Message}");
-                }
-
-                Environment.Exit(1);
-            }
+                HelpCommand => PrintHelp(),
+                VersionCommand => PrintVersion(),
+                InstallCommand cmd => InstallService(cmd),
+                UninstallCommand cmd => UninstallService(cmd),
+                RunCommand cmd => await RunRedis(cmd),
+                _ => PrintHelp()
+            };
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"错误: {ex.Message}");
+            return 1;
         }
     }
 
-    public class RedisService : BackgroundService
+    #region 命令处理
+
+    private static int PrintHelp()
     {
-        private readonly string configFilePath;
-        private readonly ILogger<RedisService> logger;
-        private Process? redisProcess;
+        CommandLineParser.PrintHelp();
+        return 0;
+    }
 
-        private string redisServerPath = string.Empty;
-        private string configPathForRedis = string.Empty;
+    private static int PrintVersion()
+    {
+        CommandLineParser.PrintVersion();
+        return 0;
+    }
 
-        public RedisService(string configFilePath, ILogger<RedisService> logger)
+    private static int InstallService(InstallCommand cmd)
+    {
+        var options = cmd.Options;
+
+        Console.WriteLine($"正在安装服务 '{options.ServiceName}'...");
+
+        // 获取当前可执行文件路径
+        var exePath = Environment.ProcessPath
+            ?? AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) + ".exe";
+
+        // 构建服务参数
+        var serviceArgs = new List<string>();
+
+        // 添加 run 命令（服务模式）
+        serviceArgs.Add("run");
+
+        // 添加配置文件参数
+        serviceArgs.Add($"-c \"{Path.GetFullPath(options.ConfigFilePath)}\"");
+
+        // 添加其他参数
+        if (options.Port.HasValue)
+            serviceArgs.Add($"--port {options.Port.Value}");
+
+        if (!string.IsNullOrEmpty(options.DataDirectory))
+            serviceArgs.Add($"--dir \"{options.DataDirectory}\"");
+
+        if (!string.IsNullOrEmpty(options.LogLevel))
+            serviceArgs.Add($"--loglevel {options.LogLevel}");
+
+        // 构建完整的二进制路径
+        var binaryPath = $"\"{exePath}\" {string.Join(" ", serviceArgs)}";
+
+        try
         {
-            this.configFilePath = configFilePath;
-            this.logger = logger;
-        }
+            ServiceManager.InstallService(
+                options.ServiceName,
+                binaryPath,
+                options.DisplayName ?? "Redis Server",
+                options.Description ?? "Redis in-memory data structure store",
+                options.StartMode);
 
-        public override Task StartAsync(CancellationToken cancellationToken)
-        {
-            try
+            Console.WriteLine($"服务 '{options.ServiceName}' 安装成功。");
+            Console.WriteLine();
+
+            // 询问是否启动服务
+            if (options.StartMode == "auto")
             {
-                var basePath = AppContext.BaseDirectory;
-                string conf = configFilePath;
-
-                if (!Path.IsPathRooted(conf))
-                    conf = Path.Combine(basePath, conf);
-
-                conf = Path.GetFullPath(conf);
-
-                logger.LogInformation("Starting Redis server with config: {ConfigPath}", conf);
-
-                // Verify config file exists
-                if (!File.Exists(conf))
+                Console.WriteLine("正在启动服务...");
+                try
                 {
-                    logger.LogWarning("Config file not found: {ConfigPath}, Redis will use defaults", conf);
+                    ServiceManager.StartServiceByName(options.ServiceName);
+                    Console.WriteLine("服务已启动。");
                 }
-
-                // Check if Redis server executable exists
-                redisServerPath = Path.Combine(basePath, "redis-server.exe");
-                if (!File.Exists(redisServerPath))
+                catch (Exception ex)
                 {
-                    logger.LogError("Redis server executable not found: {RedisServerPath}", redisServerPath);
-                    throw new FileNotFoundException($"Redis server executable not found: {redisServerPath}");
-                }
-
-                // For MSYS2/Cygwin compatibility, convert Windows path to Unix-style path
-                var diskSymbol = conf[..conf.IndexOf(":")];
-                configPathForRedis = conf
-                    .Replace(diskSymbol + ":", "/cygdrive/" + diskSymbol)
-                    .Replace("\\", "/");
-
-                redisServerPath = redisServerPath.Replace("\\", "/");
-                string arguments = $"\"{configPathForRedis}\"";
-
-                logger.LogInformation("Executing: {FileName} {Arguments}", redisServerPath, arguments);
-
-                var processStartInfo = new ProcessStartInfo(redisServerPath, arguments)
-                {
-                    WorkingDirectory = basePath,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                redisProcess = new Process();
-                redisProcess.StartInfo = processStartInfo;
-
-                // Log Redis output
-                redisProcess.OutputDataReceived += (sender, e) => {
-                    if (!string.IsNullOrEmpty(e.Data))
-                    {
-                        logger.LogInformation("Redis: {Output}", e.Data);
-                    }
-                };
-
-                redisProcess.ErrorDataReceived += (sender, e) => {
-                    if (!string.IsNullOrEmpty(e.Data))
-                    {
-                        logger.LogError("Redis Error: {Error}", e.Data);
-                    }
-                };
-
-                bool started = redisProcess.Start();
-                if (!started)
-                {
-                    throw new InvalidOperationException("Failed to start Redis process");
-                }
-
-                redisProcess.BeginOutputReadLine();
-                redisProcess.BeginErrorReadLine();
-
-                logger.LogInformation("Redis server started successfully with PID: {ProcessId}", redisProcess.Id);
-
-                return Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to start Redis server");
-                throw;
-            }
-        }
-
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            // Monitor the Redis process
-            try
-            {
-                while (!stoppingToken.IsCancellationRequested && redisProcess != null && !redisProcess.HasExited)
-                {
-                    await Task.Delay(1000, stoppingToken);
-                }
-
-                if (redisProcess?.HasExited == true)
-                {
-                    logger.LogError("Redis process exited unexpectedly with code: {ExitCode}", redisProcess.ExitCode);
+                    Console.WriteLine($"启动服务失败: {ex.Message}");
+                    Console.WriteLine($"请手动运行: sc start {options.ServiceName}");
                 }
             }
-            catch (OperationCanceledException)
+            else
             {
-                // Expected when cancellation is requested
+                Console.WriteLine($"使用以下命令启动服务: sc start {options.ServiceName}");
             }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error monitoring Redis process");
-            }
-        }
 
-        public override async Task StopAsync(CancellationToken cancellationToken)
+            return 0;
+        }
+        catch (InvalidOperationException ex)
         {
-            if (redisProcess == null || redisProcess.HasExited)
-                return;
-
-            try
-            {
-                logger.LogInformation("Stopping Redis server...");
-
-                // Try graceful shutdown via redis-cli SHUTDOWN first
-                await TryGracefulShutdownAsync();
-
-                bool exited = await WaitForExitAsync(redisProcess, 5000);
-
-                if (!exited)
-                {
-                    logger.LogWarning("Graceful shutdown timed out, forcing termination");
-                    redisProcess.Kill(true);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Error during graceful shutdown, forcing termination");
-                if (!redisProcess.HasExited)
-                    redisProcess.Kill(true);
-            }
-
-            redisProcess.Dispose();
-            redisProcess = null;
-            logger.LogInformation("Redis server stopped");
+            Console.Error.WriteLine($"错误: {ex.Message}");
+            return 1;
         }
-
-        private async Task TryGracefulShutdownAsync()
+        catch (System.ComponentModel.Win32Exception ex)
         {
-            string redisCliPath = Path.Combine(AppContext.BaseDirectory, "redis-cli.exe");
-
-            if (!File.Exists(redisCliPath))
-            {
-                logger.LogWarning("redis-cli.exe not found, skipping graceful shutdown");
-                return;
-            }
-
-            var psi = new ProcessStartInfo(redisCliPath, "SHUTDOWN")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-
-            try
-            {
-                using var cli = Process.Start(psi);
-                if (cli != null)
-                    await cli.WaitForExitAsync();
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "redis-cli SHUTDOWN command failed");
-            }
+            Console.Error.WriteLine($"错误: {ex.Message}");
+            Console.Error.WriteLine("请以管理员身份运行此程序。");
+            return 1;
         }
+    }
 
-        private static Task<bool> WaitForExitAsync(Process process, int timeoutMs)
+    private static int UninstallService(UninstallCommand cmd)
+    {
+        var serviceName = cmd.Options.ServiceName;
+
+        Console.WriteLine($"正在卸载服务 '{serviceName}'...");
+
+        try
         {
-            return Task.Run(() => process.WaitForExit(timeoutMs));
+            ServiceManager.UninstallService(serviceName);
+            Console.WriteLine($"服务 '{serviceName}' 卸载成功。");
+            return 0;
         }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"错误: {ex.Message}");
+            return 1;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            Console.Error.WriteLine($"错误: {ex.Message}");
+            Console.Error.WriteLine("请以管理员身份运行此程序。");
+            return 1;
+        }
+    }
+
+    private static async Task<int> RunRedis(RunCommand cmd)
+    {
+        var options = cmd.Options;
+
+        // 构建配置
+        var config = new RedisConfiguration
+        {
+            ConfigFilePath = options.ConfigFilePath,
+            Port = options.Port,
+            DataDirectory = options.DataDirectory,
+            LogLevel = options.LogLevel
+        };
+
+        if (options.Foreground)
+        {
+            // 前台模式运行
+            return await RunForegroundAsync(config);
+        }
+        else
+        {
+            // Windows 服务模式运行
+            return await RunAsServiceAsync(config);
+        }
+    }
+
+    private static async Task<int> RunForegroundAsync(RedisConfiguration config)
+    {
+        Console.WriteLine("正在以前台模式启动 Redis...");
+
+        using var processManager = new RedisProcessManager(config);
+
+        // 处理 Ctrl+C
+        var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (sender, e) =>
+        {
+            e.Cancel = true;
+            Console.WriteLine("\n正在停止...");
+            cts.Cancel();
+        };
+
+        // 进程退出时自动关闭
+        processManager.ProcessExited += (sender, e) =>
+        {
+            Console.WriteLine($"Redis 进程已退出 (退出码: {e.ExitCode})");
+            cts.Cancel();
+        };
+
+        try
+        {
+            var started = await processManager.StartAsync(cts.Token);
+            if (!started)
+            {
+                Console.Error.WriteLine("启动 Redis 失败");
+                return 1;
+            }
+
+            Console.WriteLine($"Redis 已启动 (PID: {processManager.ProcessId})");
+            Console.WriteLine("按 Ctrl+C 停止...");
+
+            // 等待取消信号
+            await Task.Delay(Timeout.Infinite, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // 正常退出
+        }
+        finally
+        {
+            Console.WriteLine("正在停止 Redis...");
+            await processManager.StopAsync();
+        }
+
+        return 0;
+    }
+
+    private static async Task<int> RunAsServiceAsync(RedisConfiguration config)
+    {
+        var host = Host.CreateDefaultBuilder()
+            .UseWindowsService()
+            .ConfigureLogging(logging =>
+            {
+#pragma warning disable CA1416 // 平台兼容性警告：AddEventLog 仅在 Windows 上可用
+                logging.AddEventLog();
+#pragma warning restore CA1416
+                logging.SetMinimumLevel(LogLevel.Information);
+            })
+            .ConfigureServices((context, services) =>
+            {
+                services.AddSingleton(config);
+                services.AddSingleton<RedisProcessManager>();
+                services.AddHostedService<RedisBackgroundService>();
+            })
+            .Build();
+
+        await host.RunAsync();
+        return 0;
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// Redis 后台服务（用于 Windows 服务模式）
+/// </summary>
+public class RedisBackgroundService : BackgroundService
+{
+    private readonly RedisConfiguration _config;
+    private readonly ILogger<RedisBackgroundService> _logger;
+    private readonly RedisProcessManager _processManager;
+
+    public RedisBackgroundService(RedisConfiguration config, RedisProcessManager processManager, ILogger<RedisBackgroundService> logger)
+    {
+        _config = config;
+        _processManager = processManager;
+        _logger = logger;
+    }
+
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("正在启动 Redis 服务...");
+
+        _processManager.ProcessExited += OnProcessExited;
+
+        var started = await _processManager.StartAsync(cancellationToken);
+        if (!started)
+        {
+            _logger.LogError("启动 Redis 进程失败");
+            throw new InvalidOperationException("无法启动 Redis 进程");
+        }
+
+        _logger.LogInformation("Redis 服务已启动 (PID: {ProcessId})", _processManager.ProcessId);
+
+        await base.StartAsync(cancellationToken);
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // 保持服务运行
+        await Task.Delay(Timeout.Infinite, stoppingToken);
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("正在停止 Redis 服务...");
+
+        _processManager.ProcessExited -= OnProcessExited;
+        await _processManager.StopAsync(cancellationToken);
+
+        _logger.LogInformation("Redis 服务已停止");
+
+        await base.StopAsync(cancellationToken);
+    }
+
+    private void OnProcessExited(object? sender, ProcessExitedEventArgs e)
+    {
+        _logger.LogWarning("Redis 进程意外退出 (退出码: {ExitCode})", e.ExitCode);
     }
 }

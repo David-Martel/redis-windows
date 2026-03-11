@@ -1,90 +1,149 @@
-# Redis for Windows - LLM Agent Coordination
+# Redis for Windows
 
-A production-ready Redis 8.4.0 server for Windows, wrapped in a .NET 8 Windows Service, with a high-performance Rust coordination library (`agent-sync`) for LLM agents.
+[![Build](https://github.com/redis-windows/redis-windows/actions/workflows/build-redis.yml/badge.svg)](https://github.com/redis-windows/redis-windows/actions)
+[![Release](https://img.shields.io/github/v/release/redis-windows/redis-windows)](https://github.com/redis-windows/redis-windows/releases)
 
-## Architecture
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   LLM Agents    │───▶│   agent-sync    │───▶│  Redis Server   │
-│ (Claude, GPT,   │    │   (Rust lib)    │    │  (Windows Svc)  │
-│  local models)  │    │                 │    │  Port 6380      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                        Distributed tasks
-                        Shared context
-                        Pub/sub notifications
-                        Agent registry
-```
-
-## Components
-
-| Component | Technology | Status |
-|-----------|-----------|--------|
-| Redis Server | Redis 8.4.0 (upstream merged) | Production |
-| Windows Service | .NET 8 BackgroundService | Production |
-| agent-sync | Rust async library | Development |
-| Build System | PowerShell + GitHub Actions | Production |
+Compiled from official Redis source for Windows.
 
 ## Quick Start
 
-```powershell
-# Clone and build
-git clone https://github.com/david-t-martel/redis-windows.git
-cd redis-windows
+```cmd
+# After download and extract
+redis-server.exe redis.conf
 
-# Build .NET service
-dotnet build RedisService.csproj -c Release
+# Or use RedisService (recommended)
+RedisService.exe run --foreground
+```
 
-# Install as Windows service (admin required)
-.\install-redis-service.ps1
+## Usage
 
-# Start Redis
+### Option 1: RedisService.exe (Recommended)
+
+Automatically handles path conversion. Use native Windows paths.
+
+```cmd
+# Run in foreground
+RedisService.exe run --foreground --port 6379 --dir C:\redis-data
+
+# Install as Windows service
+RedisService.exe install -c C:\config\redis.conf --dir D:\data\redis --port 6379
 net start Redis
 
-# Verify
-redis-cli.exe -p 6380 ping   # PONG
+# Uninstall service
+RedisService.exe uninstall
 ```
+
+### Option 2: redis-server.exe (Direct)
+
+**Important:** This build uses Cygwin runtime. Command-line paths must use Cygwin format.
+
+```cmd
+# ✅ Correct - Cygwin path format
+redis-server.exe /cygdrive/c/config/redis.conf --dir /cygdrive/d/data --port 6379
+
+# ❌ Wrong - Windows paths not supported
+redis-server.exe C:\config\redis.conf --dir D:\data
+```
+
+**Path Conversion:**
+
+| Windows | Cygwin |
+|---------|--------|
+| `C:\path` | `/cygdrive/c/path` |
+| `D:\path` | `/cygdrive/d/path` |
+| `.\data` | `./data` (relative works as-is) |
+
+**In config file:** Use forward slashes (Windows style with `/`).
+
+```conf
+# Recommended in redis.conf
+dir C:/redis/data
+logfile C:/redis/logs/redis.log
+```
+
+## RedisService CLI Reference
+
+```cmd
+RedisService.exe [command] [options]
+
+Commands:
+  install       Install as Windows service
+  uninstall     Uninstall Windows service
+  run           Run Redis (default)
+
+Options:
+  -c, --config <FILE>      Config file path
+  --port <PORT>            Server port
+  --dir <DIRECTORY>        Data directory
+  --loglevel <LEVEL>       Log level (debug/verbose/notice/warning)
+  -f, --foreground         Run in foreground
+  --service-name <NAME>    Service name (default: Redis)
+  --start-mode <MODE>      Startup type (auto/manual)
+  -h, --help               Show help
+  -v, --version            Show version
+```
+
+## Cross-Partition/Directories
+
+Config, data, and program can be in any location:
+
+```cmd
+# Program: C:\redis\RedisService.exe
+# Config:  D:\config\redis.conf
+# Data:    E:\data\redis
+
+RedisService.exe run -c D:\config\redis.conf --dir E:\data\redis --foreground
+```
+
+## Data Persistence
+
+Data is saved automatically on shutdown. `RedisService.exe` correctly passes `--dir` to ensure data is saved to the specified directory.
+
+```cmd
+# Start
+RedisService.exe run --foreground --dir C:\redis-data
+
+# Write data
+redis-cli SET mykey myvalue
+
+# Graceful shutdown
+redis-cli SHUTDOWN
+
+# Restart - data persists
+redis-cli GET mykey   # Returns "myvalue"
+```
+
+## FAQ
+
+### redis-server.exe can't find config file?
+
+Use Cygwin path format:
+```cmd
+redis-server.exe /cygdrive/c/config/redis.conf
+```
+
+Or use `RedisService.exe` which handles path conversion automatically.
+
+### Data lost after restart?
+
+1. Always specify `--dir` option
+2. Use graceful shutdown (`redis-cli SHUTDOWN` or `Ctrl+C`), don't kill the process
+3. Use the same `--dir` when restarting
+
+## Technical Details
+
+- Build toolchain: MSYS2 / Cygwin
+- Service wrapper: .NET 10.0
+- Path handling: RedisService auto-converts Windows ↔ Cygwin paths
 
 ## Agent Integration (Rust)
 
-The `agent-sync` crate provides distributed coordination primitives for AI agents:
-
-```toml
-[dependencies]
-agent-sync = "0.1.0"
-```
-
-```rust
-use agent_sync::{AgentSync, Config};
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let config = Config::builder()
-        .redis_url("redis://localhost:6380")
-        .build()?;
-    let client = AgentSync::new(config).await?;
-
-    // Submit a task
-    let task_id = client.task_queue().submit("process_data", payload).await?;
-
-    // Share context between agents
-    client.shared_context().set("key", value).await?;
-
-    // Subscribe to notifications
-    client.notification_bus().subscribe("topic.*").await?;
-
-    Ok(())
-}
-```
-
-### Core Capabilities
+The `agent-sync` crate (`agent-sync/`) provides distributed coordination primitives for LLM agents:
 
 - **TaskQueue** - Priority-based distributed task scheduling with dependencies
-- **SharedContext** - Type-safe key-value storage with TTL and semantic search
-- **NotificationBus** - Pub/sub messaging with topic patterns and direct messaging
+- **SharedContext** - Type-safe key-value storage with TTL
+- **NotificationBus** - Pub/sub messaging with topic patterns
 - **AgentRegistry** - Agent liveness tracking with heartbeats and capabilities
-
-### Building agent-sync
 
 ```bash
 cd agent-sync
@@ -95,95 +154,12 @@ cargo clippy -- -D warnings
 
 See [`agent-sync/README.md`](agent-sync/README.md) for full API documentation.
 
-## Redis Configuration
+---
 
-### Dual Instance Strategy
-
-| Instance | Port | Purpose | Config |
-|----------|------|---------|--------|
-| Windows Service | 6380 | Production agent workloads | `redis-agent.conf` |
-| WSL Redis | 6379 | Development / testing | System default |
-
-```powershell
-# Manage both instances
-.\manage-dual-redis.ps1 -Action status
-.\manage-dual-redis.ps1 -Action start -Target both
-
-# Switch agent target
-.\configure-agent-redis.ps1 -Target windows   # Port 6380
-.\configure-agent-redis.ps1 -Target wsl        # Port 6379
-```
-
-### Agent-Optimized Settings (`redis-agent.conf`)
-
-```conf
-maxmemory 2gb
-maxmemory-policy allkeys-lru
-lazyfree-lazy-eviction yes
-activedefrag yes
-proto-max-bulk-len 512mb
-notify-keyspace-events "Ex"
-appendonly yes
-```
-
-## Build Options
-
-```powershell
-# Interactive menu
-.\build.ps1
-
-# Direct commands
-.\build.ps1 -BuildOnly               # Build .NET service
-.\build.ps1 -CheckLatestRelease      # Check GitHub releases
-.\build.ps1 -DownloadOnly            # Download Redis binaries
-.\build.ps1 -GitHubWorkflow          # Trigger CI build
-```
-
-## Monitoring
-
-```powershell
-redis-cli.exe -p 6380 info memory
-redis-cli.exe -p 6380 info clients
-redis-cli.exe --latency-history -p 6380
-Get-EventLog -LogName Application -Source "Redis*" -Newest 10
-```
-
-## Documentation
-
-| Guide | Description |
-|-------|-------------|
-| [Setup Guide](SETUP_GUIDE.md) | Detailed installation and configuration |
-| [Quick Start](QUICKSTART.md) | Get running in 5 minutes |
-| [Dual Redis Guide](DUAL_REDIS_GUIDE.md) | WSL + Windows dual instance setup |
-| [agent-sync README](agent-sync/README.md) | Rust library API and architecture |
-| [agent-sync Testing](RUST_TESTING_STRATEGY.md) | Testing strategy for agent-sync |
-
-## Dependencies
-
-### Required
-- **.NET SDK 8.0** - Windows service wrapper
-- **Redis binaries** - Auto-downloaded from GitHub releases
-- **PowerShell 5.1+** - Build scripts
-
-### Optional
-- **Rust 1.75+** - For building agent-sync
-- **GitHub CLI** - Release management
-- **Administrator privileges** - Service installation
-
-## Contributing
-
-Contributions welcome, especially for:
-- Agent framework integrations
-- Performance optimizations
-- Cross-platform testing
-- Documentation improvements
-
-## License
-
-This project is licensed under the same terms as Redis - see [LICENSE](LICENSE) for details.
+English | [简体中文](README.zh_CN.md)
 
 ## Disclaimer
 
-This GitHub organization and its repositories are not affiliated with, endorsed by, or sponsored by Redis Ltd. The license provided here applies only to the content of this repository, and does not apply to the official [Redis](https://github.com/redis/redis) project or its software.
+This project is not affiliated with, endorsed by, or sponsored by Redis Ltd. The license provided here applies only to this repository, not to the official Redis project.
 
-We suggest that you use it for local development and follow Redis official guidance to deploy it on Linux for production environment. This project doesn't bear any responsibility for any losses caused by using it and is only for learning and exchange purposes.
+This is recommended for local development only. For production environments, please follow Redis official guidance and deploy on Linux. This project is not responsible for any losses caused by its use.
