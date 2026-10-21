@@ -27,6 +27,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ServiceDir = "C:\Program Files\Redis"
+$DataDir = "C:\ProgramData\Redis\data"
+$LogDir = "C:\ProgramData\Redis\logs"
 $ProjectRoot = $PSScriptRoot
 
 # --- Uninstall path ---
@@ -54,6 +56,11 @@ Write-Host "Source binary: $ExeSource" -ForegroundColor Cyan
 # --- Ensure target directory exists ---
 if (-not (Test-Path $ServiceDir)) {
     New-Item -ItemType Directory -Path $ServiceDir -Force | Out-Null
+}
+foreach ($path in @($DataDir, $LogDir)) {
+    if (-not (Test-Path $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
 }
 
 # --- Stop existing service before replacing binary ---
@@ -115,13 +122,13 @@ if ($existingSvc) {
     & sc.exe config $ServiceName binPath= $binPath start= auto | Out-Null
     Write-Host "Updated service binary path." -ForegroundColor Cyan
 } else {
-    & sc.exe create $ServiceName binPath= $binPath start= auto DisplayName= $DisplayName
+    New-Service -Name $ServiceName -BinaryPathName $binPath -DisplayName $DisplayName -StartupType Automatic | Out-Null
     Write-Host "Created service '$ServiceName'." -ForegroundColor Green
 }
 
 Write-Host "Starting service..." -ForegroundColor Cyan
-& net start $ServiceName
-if ($LASTEXITCODE -ne 0) {
+Start-Service -Name $ServiceName
+if ((Get-Service $ServiceName).Status -ne 'Running') {
     Write-Error "Service failed to start. Check Event Log: Get-EventLog -LogName Application -Source 'Redis*' -Newest 10"
     exit 1
 }
